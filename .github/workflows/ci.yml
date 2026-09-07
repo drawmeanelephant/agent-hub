@@ -84,8 +84,9 @@ jobs:
             -d '{"answer":"yes"}' "http://127.0.0.1:8801/api/questions/$QID/answer" | grep -q '"status": "answered"'
 
           # task board lifecycle: create → claim (pinned, no spoofing) →
-          # double-claim 409 → done with result
+          # double-claim 409 → third-party interference 409 → done with result
           TBIRD_TOKEN=$(node collector/tokens.js add smoketask | grep -o '[a-f0-9]\{40\}')
+          INT_TOKEN=$(node collector/tokens.js add smokeintruder | grep -o '[a-f0-9]\{40\}')
           TID=$(curl -sf -H "$auth" -H "Content-Type: application/json" \
             -d '{"title":"ci smoke task","detail":"lifecycle check"}' \
             http://127.0.0.1:8801/api/tasks | grep -o 't-[a-z0-9-]*' | head -1)
@@ -94,15 +95,20 @@ jobs:
           code=$(curl -s -o /dev/null -w "%{http_code}" -H "$auth" -X POST \
             "http://127.0.0.1:8801/api/tasks/$TID/claim")
           [ "$code" = "409" ] || { echo "FAIL: double-claim -> $code (want 409)"; exit 1; }
-          code=$(curl -s -o /dev/null -w "%{http_code}" -H "$auth" -X POST \
-            "http://127.0.0.1:8801/api/tasks/$TID/done")
-          [ "$code" = "409" ] || { echo "FAIL: non-claimer done -> $code (want 409)"; exit 1; }
+          # a third party can neither release nor complete smoketask's claim
+          # (the admin token may — by design — so it can't play the intruder here)
+          for act in release done; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $INT_TOKEN" -X POST \
+              "http://127.0.0.1:8801/api/tasks/$TID/$act")
+            [ "$code" = "409" ] || { echo "FAIL: intruder $act -> $code (want 409)"; exit 1; }
+          done
           curl -sf -H "Authorization: Bearer $TBIRD_TOKEN" -H "Content-Type: application/json" \
             -d '{"result":"verified"}' -X POST "http://127.0.0.1:8801/api/tasks/$TID/done" | grep -q '"status": "done"'
 
           # the token must never touch the log (we log paths only)
           if grep -q "$TOKEN" collector.log; then echo "FAIL: token leaked into collector.log"; exit 1; fi
           if grep -q "$TBIRD_TOKEN" collector.log; then echo "FAIL: agent token leaked into collector.log"; exit 1; fi
+          if grep -q "$INT_TOKEN" collector.log; then echo "FAIL: intruder token leaked into collector.log"; exit 1; fi
 
           # cleanup
           curl -sf -X DELETE -H "$auth" "http://127.0.0.1:8801/api/posts/ci-smoke" >/dev/null
