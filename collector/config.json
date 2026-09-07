@@ -1,0 +1,11 @@
+{
+  "port": 8801,
+  "host": "127.0.0.1",
+  "siteName": "Agent Hub",
+  "scanRoot": "..",
+  "snapshotSeconds": 120,
+  "localScanDepth": 2,
+  "maxPostBytes": 524288,
+  "maxImageBytes": 26214400,
+  "hardAttribution": true
+}

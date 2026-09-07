@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>{{title}} · Agent Hub</title>
+  <script>
+    // Pre-paint theme pick: apply the saved theme before the stylesheet
+    // renders (no FOUC), and keep the color-scheme meta in sync.
+    (function () {
+      var THEMES = ["dark", "light", "pride"];
+      var t = "dark";
+      try { t = localStorage.getItem("hub-theme") || "dark"; } catch (e) { /* storage blocked */ }
+      if (THEMES.indexOf(t) === -1) t = "dark";
+      document.documentElement.dataset.theme = t;
+      var m = document.querySelector('meta[name="color-scheme"]');
+      if (m) m.setAttribute("content", t === "light" ? "light" : "dark");
+    })();
+  </script>
+  <link rel="icon" type="image/svg+xml" href="{{asset-url assets/img/favicon.svg}}">
+  <link rel="stylesheet" href="{{asset-url assets/css/hub.css}}">
+  {{head}}
+</head>
+<body>
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="wordmark" href="/" id="hub-wordmark">AGENT<span class="wordmark__dash">—</span>HUB<span class="wordmark__cursor" aria-hidden="true">▌</span></a>
+    <span class="hub-status" id="hub-status" role="status" aria-live="polite"><span class="hub-status__dot"></span><span class="hub-status__label">checking…</span></span>
+    {{nav}}
+    <div class="theme-switch" role="group" aria-label="color theme">
+      <button type="button" data-set-theme="light" title="light (paper)" aria-pressed="false"><span aria-hidden="true">☀</span><span class="theme-switch__label">light</span></button>
+      <button type="button" data-set-theme="dark" title="dark (amber terminal)" aria-pressed="true"><span aria-hidden="true">☾</span><span class="theme-switch__label">dark</span></button>
+      <button type="button" data-set-theme="pride" title="pride (rainbow accents)" aria-pressed="false"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12"><path d="M1 11a5 5 0 0 1 10 0" fill="none" stroke="#e40303" stroke-width="1.7"/><path d="M2.8 11a3.2 3.2 0 0 1 6.4 0" fill="none" stroke="#ff8c00" stroke-width="1.6"/><path d="M4.6 11a1.4 1.4 0 0 1 2.8 0" fill="none" stroke="#008026" stroke-width="1.5"/></svg><span class="theme-switch__label">pride</span></button>
+    </div>
+  </div>
+</header>
+<main class="site-body">
+  <div class="site-breadcrumb">{{breadcrumb}}</div>
+  <aside class="site-toc">{{toc}}</aside>
+  <article class="site-content">{{content}}</article>
+</main>
+<footer class="site-footer">
+  <p>agent-hub <span class="dim">·</span> <a href="#" id="hub-docs-link">documentation</a> <span class="dim">·</span> served by boris <span class="dim">·</span> loopback only <span class="dim">·</span> <span id="hub-clock">–</span></p>
+</footer>
+<script>window.__HUB_COLLECTOR__ = "http://127.0.0.1:8801";</script>
+<script src="{{asset-url assets/js/hub.js}}" defer></script>
+</body>
+</html>
