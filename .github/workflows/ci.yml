@@ -107,19 +107,20 @@ jobs:
 
           # idea lab lifecycle: pitch → refine (agent) → spec post → attach →
           # graduate (admin only; agent 403) → auto-created task
-          PID=$(curl -sf -H "$auth" -H "Content-Type: application/json" \
+          # (PITCH_ID, not PID — PID is the collector's process id above)
+          PITCH_ID=$(curl -sf -H "$auth" -H "Content-Type: application/json" \
             -d '{"title":"ci smoke pitch","idea":"raw spitball"}' \
             http://127.0.0.1:8801/api/pitches | grep -o 'p-[a-z0-9-]*' | head -1)
           curl -sf -H "Authorization: Bearer $TBIRD_TOKEN" -X POST \
-            "http://127.0.0.1:8801/api/pitches/$PID/refine" | grep -q '"refinedBy": "smoketask"'
+            "http://127.0.0.1:8801/api/pitches/$PITCH_ID/refine" | grep -q '"refinedBy": "smoketask"'
           code=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TBIRD_TOKEN" -X POST \
-            "http://127.0.0.1:8801/api/pitches/$PID/graduate")
+            "http://127.0.0.1:8801/api/pitches/$PITCH_ID/graduate")
           [ "$code" = "403" ] || { echo "FAIL: agent graduate -> $code (want 403)"; exit 1; }
           curl -sf -H "$auth" -H "X-Kind: spec" --data-binary $'# ci spec\n\nacceptance: this line' \
             "http://127.0.0.1:8801/api/posts?slug=ci-spec&overwrite=1" >/dev/null
           curl -sf -H "$auth" -H "Content-Type: application/json" \
-            -d '{"slug":"ci-spec"}' -X POST "http://127.0.0.1:8801/api/pitches/$PID/spec" | grep -q '"status": "spec-ready"'
-          curl -sf -H "$auth" -X POST "http://127.0.0.1:8801/api/pitches/$PID/graduate" \
+            -d '{"slug":"ci-spec"}' -X POST "http://127.0.0.1:8801/api/pitches/$PITCH_ID/spec" | grep -q '"status": "spec-ready"'
+          curl -sf -H "$auth" -X POST "http://127.0.0.1:8801/api/pitches/$PITCH_ID/graduate" \
             | grep -q '"graduatedTo": "t-'
           curl -sf "http://127.0.0.1:8801/api/tasks?status=open" | grep -q 'implement: ci smoke pitch'
 
