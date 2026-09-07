@@ -12,6 +12,7 @@ const buildstate = require('./buildstate');
 const questions = require('./questions');
 const agents = require('./agents');
 const tasks = require('./tasks');
+const pitches = require('./pitches');
 
 const CFG = { ...JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8')), ROOT: store.ROOT };
 const STARTED = Date.now();
@@ -321,6 +322,80 @@ async function handle(req, res) {
     }
   }
 
+  // ---- idea lab (pitch → refine → spec → graduate) ----
+  if (method === 'GET' && p === '/api/pitches') {
+    const status = url.searchParams.get('status') || 'all';
+    const all = ['open', 'refining', 'spec-ready', 'graduated', 'shelved', 'all'];
+    if (!all.includes(status)) {
+      return err(res, 400, '?status= must be ' + all.join(', '), req, started);
+    }
+    let rows;
+    if (status === 'mine') {
+      const tok = authorized(req, url);
+      if (!tok) return err(res, 401, 'unauthorized — ?status=mine needs a token', req, started);
+      rows = pitches.listPitches('all').filter((p) => p.createdBy === tok.name || p.refinedBy === tok.name);
+    } else {
+      rows = pitches.listPitches(status);
+    }
+    return json(res, 200, {
+      ok: true,
+      counts: pitches.countsByStatus(),
+      count: rows.length,
+      pitches: rows,
+    }, req, started);
+  }
+
+  if (method === 'POST' && p === '/api/pitches') {
+    const tok = authorized(req, url);
+    if (!tok) return err(res, 401, 'unauthorized — pass an upload token', req, started);
+    let obj;
+    try { obj = JSON.parse((await readBody(req, 65536)).toString('utf8') || '{}'); } catch { return err(res, 400, 'invalid JSON body', req, started); }
+    try {
+      const by = pickAgent(req, url, obj, tok.name);
+      const p = pitches.addPitch({ title: obj.title, idea: obj.idea, createdBy: by });
+      store.addEvent({ agent: p.createdBy, type: 'pitch', message: 'pitched "' + p.title.slice(0, 120) + '" (' + p.id + ')' });
+      return json(res, 201, { ok: true, pitch: p }, req, started);
+    } catch (e) {
+      return err(res, 400, String(e.message || e), req, started);
+    }
+  }
+
+  const pm = /^\/api\/pitches\/([a-z0-9][a-z0-9-]*)\/(refine|release|spec|graduate|shelve)$/.exec(p);
+  if (method === 'POST' && pm) {
+    const tok = authorized(req, url);
+    if (!tok) return err(res, 401, 'unauthorized — pass an upload token', req, started);
+    let obj = {};
+    try { obj = JSON.parse((await readBody(req, 65536)).toString('utf8') || '{}'); } catch { /* body optional */ }
+    const by = tok.name; // refinement claims are pinned to the token identity
+    const act = pm[2];
+    try {
+      let p;
+      if (act === 'refine') p = pitches.refinePitch(pm[1], { by });
+      else if (act === 'release') p = pitches.releasePitch(pm[1], { by });
+      else if (act === 'spec') {
+        const s = store.slugify(String(obj.slug || ''));
+        if (!obj.slug || !store.postExists(s)) {
+          return err(res, 400, 'no such post — publish the spec first (POST /api/posts with X-Kind: spec)', req, started);
+        }
+        p = pitches.attachSpec(pm[1], { by, slug: s });
+      }
+      else if (act === 'graduate') {
+        if (by !== 'primary') return err(res, 403, 'graduating is humans-only: use the primary/admin token', req, started);
+        p = pitches.graduatePitch(pm[1], { taskBoard: tasks });
+      } else p = pitches.shelvePitch(pm[1], { by, reason: obj.reason });
+      if (!p) return err(res, 404, 'no such pitch', req, started);
+      const label = '"' + p.title.slice(0, 120) + '" (' + p.id + ')';
+      if (act === 'refine') store.addEvent({ agent: p.refinedBy, type: 'pitch', message: 'is refining pitch ' + label });
+      else if (act === 'release') store.addEvent({ agent: by, type: 'pitch', message: 'released pitch ' + label });
+      else if (act === 'spec') store.addEvent({ agent: by, type: 'pitch', message: 'attached spec for pitch ' + label + ' → /posts/' + p.specSlug + '.html' });
+      else if (act === 'graduate') store.addEvent({ agent: 'human', type: 'pitch', message: 'GRADUATED pitch ' + label + ' → task ' + p.graduatedTo });
+      else store.addEvent({ agent: by, type: 'pitch', message: 'shelved pitch ' + label + (p.shelvedReason ? ' — ' + p.shelvedReason : '') });
+      return json(res, act === 'refine' ? 201 : 200, { ok: true, pitch: p }, req, started);
+    } catch (e) {
+      return err(res, 409, String(e.message || e), req, started);
+    }
+  }
+
   // ---- status (dashboard + agents) ----
   if (method === 'GET' && p === '/api/status') {
     store.syncGeneratedDocs(); // keep on-site docs pages in sync with the sources
@@ -332,6 +407,7 @@ async function handle(req, res) {
       counts: store.counts(),
       openQuestions: questions.openCount(),
       tasks: tasks.countsByStatus(),
+      pitches: pitches.countsByStatus(),
       build: await buildstate.buildState(),
       tokens: store.listTokens().map((t) => ({ name: t.name, created: t.created, lastUsed: t.lastUsed })),
       github: { ...snap.github, fetchedAt: snapshot.snapshotAge() === null ? null : new Date(Date.now() - (snapshot.snapshotAge() || 0)).toISOString() },

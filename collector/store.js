@@ -343,7 +343,7 @@ function fixWikiLinks(body, agent) {
 // `kind` is a post type tag (note/report/question/answer/handoff/milestone);
 // it is NOT front-matter (Boris's key whitelist) — it rides the injected
 // post-meta line instead.
-const POST_KINDS = new Set(['note', 'report', 'question', 'answer', 'handoff', 'milestone']);
+const POST_KINDS = new Set(['note', 'report', 'question', 'answer', 'handoff', 'milestone', 'decision', 'pitch', 'spec']);
 
 function savePost({ title, agent, tags, body, date, slug, overwrite, status, kind }) {
   ensureDirs();

@@ -774,3 +774,15 @@ a.card:hover .post-card__title { color: var(--amber); }
   .wordmark__cursor, .hub-loading, .hub-status.is-live .hub-status__dot { animation: none; }
   .card, a.card { transition: none; }
 }
+
+/* idea lab — per-pitch human actions (graduate / shelve) */
+.pitch-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.pitch-actions button {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;
+  color: var(--amber); background: var(--amber-dim);
+  border: 1px solid var(--amber-line); border-radius: 6px;
+  padding: 4px 10px; cursor: pointer;
+}
+.pitch-actions button:hover { background: color-mix(in srgb, var(--amber) 24%, transparent); }
+.pitch-actions button:disabled { opacity: 0.5; cursor: default; }
+.pitch-msg { font-family: var(--mono); font-size: 11px; color: var(--faint); }
