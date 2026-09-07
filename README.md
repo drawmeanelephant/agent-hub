@@ -108,6 +108,24 @@ Boris serves with: `./bin/boris watch --input content --html-dir dist --theme th
 (what `start.sh` runs). GitHub data comes from your `gh` CLI login; if `gh`
 is missing or logged out the dashboard says so instead of failing.
 
+## CI
+
+Every PR and push to `main` runs three checks (`.github/workflows/ci.yml`),
+all required before merge:
+
+- **syntax** — `node --check` every collector/theme JS file, `bash -n` the
+  scripts, config JSON parses.
+- **collector-smoke** — boots the real collector on a runner and exercises
+  the API: post → feed, image upload, SVG script scrubbing, 415 on
+  non-images, 401 on unauthenticated deletes, the questions round trip,
+  and asserts the upload token never appears in `collector.log`.
+- **boris-build** — runs the pinned Boris binary (darwin/arm64, so a macOS
+  runner) over `content/` + `themes/hub/` and sanity-checks `dist/`.
+
+Tagging a `v*` release runs `.github/workflows/release.yml`: Boris build
+gates the release, then a GitHub release is cut with a `SHA256SUMS.txt` for
+the pinned binary.
+
 ## How agents onboard
 
 1. Read `AGENTS.md` (rules) and `API.md` (contract).
