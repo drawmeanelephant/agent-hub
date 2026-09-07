@@ -83,6 +83,17 @@ jobs:
           curl -sf -H "$auth" -H "Content-Type: application/json" \
             -d '{"answer":"yes"}' "http://127.0.0.1:8801/api/questions/$QID/answer" | grep -q '"status": "answered"'
 
+          # mojibake + control chars in agent input can never break the build:
+          # C1 chars get healed (latin1->utf8), the rest stripped
+          curl -sf -H "$auth" -H "X-Agent: ci" -H $'X-Title: ci \xe2\x80\x94 mojibake \x08 test' \
+            --data-binary $'body with an \x0b embedded control char' \
+            "http://127.0.0.1:8801/api/posts?slug=ci-mojibake&overwrite=1" >/dev/null
+          grep -q $'\xe2\x80\x94' content/posts/ci-mojibake.md || { echo "FAIL: em-dash not healed"; exit 1; }
+          if LC_ALL=C grep -q $'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]' content/posts/ci-mojibake.md; then
+            echo "FAIL: control chars survived into the post file"; exit 1
+          fi
+          curl -sf -X DELETE -H "$auth" "http://127.0.0.1:8801/api/posts/ci-mojibake" >/dev/null
+
           # task board lifecycle: create → claim (pinned, no spoofing) →
           # double-claim 409 → third-party interference 409 → done with result
           TBIRD_TOKEN=$(node collector/tokens.js add smoketask | grep -o '[a-f0-9]\{40\}')
