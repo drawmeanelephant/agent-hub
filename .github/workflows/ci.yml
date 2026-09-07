@@ -92,9 +92,12 @@ jobs:
             --data-binary $'body with an \x0b embedded control char' \
             "http://127.0.0.1:8801/api/posts?slug=ci-mojibake&overwrite=1" >/dev/null
           grep -q $'\xe2\x80\x94' content/posts/ci-mojibake.md || { echo "FAIL: em-dash not healed"; exit 1; }
-          if LC_ALL=C grep -q $'[\x01-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]' content/posts/ci-mojibake.md; then
-            echo "FAIL: control chars survived into the post file"; exit 1
-          fi
+          # sweep by CODEPOINT, not bytes: a valid UTF-8 em-dash contains
+          # continuation bytes 0x80/0x94, which are legal — only decoded C1
+          # codepoints are poison (this is what Boris validates)
+          node -e 'const s = require("fs").readFileSync("content/posts/ci-mojibake.md", "utf8");
+            const m = s.match(/[\u0001-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g);
+            if (m) { console.log("FAIL: control chars:", m.map((c) => c.codePointAt(0).toString(16)).join(" ")); process.exit(1); }'
           # query title beats nothing: no X-Title header on this call, so the
           # control char in the query param must be stripped from the title
           curl -sf -H "$auth" -H "X-Agent: ci" \
