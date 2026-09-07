@@ -20,14 +20,39 @@
   </script>
   <link rel="icon" type="image/svg+xml" href="{{asset-url assets/img/favicon.svg}}">
   <link rel="stylesheet" href="{{asset-url assets/css/hub.css}}">
+<!-- 🔍 DESIGN REVIEW · auto-designer · 2026-09-07 · pass 1 (rendered + code audit)
+     Verdict: strong, coherent concept — "amber terminal" ops-room. Real token
+     system, three complete themes, personality without kitsch. Findings are
+     refinement, not redirection. Full list: DESIGN-REVIEW.md (repo root).
+     DR-01 [a11y] --faint #5a6a7d on #0b0e13 ≈ 3.4:1 — fails AA at the
+          10–12px sizes it is used at (hints, timestamps, TOC, footer).
+          Try ~#76879c or reserve --faint for decorative text only.
+     DR-02 [contrast] light --amber #9c5c06 on paper ≈ 4.2:1 — borderline
+          for 15px prose links; darken a step or underline links on light.
+     DR-03 [type] 6+ distinct sizes below 13px; collapse to one 11px "micro"
+          size and carry hierarchy with weight/tracking instead.
+     → second reviewer: reply under the matching DR-xx in DESIGN-REVIEW.md. -->
   {{head}}
 </head>
 <body>
 <header class="site-header">
   <div class="site-header__inner">
     <a class="wordmark" href="/" id="hub-wordmark">AGENT<span class="wordmark__dash">—</span>HUB<span class="wordmark__cursor" aria-hidden="true">▌</span></a>
+<!-- DR-06 [praise] live/down pill with the pulsing dot is the right ambient
+     signal, placed exactly where the eye lands first. Keep. -->
     <span class="hub-status" id="hub-status" role="status" aria-live="polite"><span class="hub-status__dot"></span><span class="hub-status__label">checking…</span></span>
     {{nav}}
+<!-- DR-04 [mobile/touch] Subnav opens on :hover/:focus-within only — no
+     touch path, so Documentation / API Reference / every blog post in this
+     nav forest is unreachable on phones and tablets. Fix: first tap opens
+     the submenu (intercept the click while closed) or render satellites as
+     <details>. No hamburger needed.
+     DR-05 [keyboard] Submenus are tab-reachable via focus-within (good) but
+     parent links give no aria-expanded hint that a group opens. -->
+<!-- DR-07 [focus] amber :focus-visible is custom for these buttons and the
+     question inputs, but nav links / cards / task + pitch inputs fall back
+     to UA defaults. Standardize globally: :focus-visible { outline: 2px
+     solid var(--amber); outline-offset: 2px; } -->
     <div class="theme-switch" role="group" aria-label="color theme">
       <button type="button" data-set-theme="light" title="light (paper)" aria-pressed="false"><span aria-hidden="true">☀</span><span class="theme-switch__label">light</span></button>
       <button type="button" data-set-theme="dark" title="dark (amber terminal)" aria-pressed="true"><span aria-hidden="true">☾</span><span class="theme-switch__label">dark</span></button>
@@ -37,12 +62,27 @@
 </header>
 <main class="site-body">
   <div class="site-breadcrumb">{{breadcrumb}}</div>
+<!-- DR-08 [IA] On this page the TOC lists only "Mission Control" while
+     hub.js injects ~12 h2 sections, and .hub-wide then hides the TOC
+     entirely. Either register injected sections into the TOC at runtime or
+     drop the TOC on dashboard pages — right now it promises navigation it
+     does not deliver. -->
   <aside class="site-toc">{{toc}}</aside>
   <article class="site-content">{{content}}</article>
 </main>
+<!-- DR-09 [praise] quiet footer clock + "loopback only" is honest chrome.
+     Note DR-01's --faint contrast applies to this line too. -->
 <footer class="site-footer">
   <p>agent-hub <span class="dim">·</span> <a href="#" id="hub-docs-link">documentation</a> <span class="dim">·</span> served by boris <span class="dim">·</span> loopback only <span class="dim">·</span> <span id="hub-clock">–</span></p>
 </footer>
+<!-- DR-10 [critical] The dashboard is re-rendered via innerHTML every 10s.
+     Anything the human is typing — answer, task, pitch — is silently
+     destroyed mid-keystroke and focus is lost. Skip the render tick while an
+     input inside #dashboard-root has focus (or patch sections in place).
+     The one fix I would ship before anything cosmetic.
+     DR-11 [a11y] aria-live="polite" on a fully-replaced 10s container
+     re-announces the whole dashboard to screen readers; scope live regions
+     to narrow status rows instead. -->
 <script>window.__HUB_COLLECTOR__ = "http://127.0.0.1:8801";</script>
 <script src="{{asset-url assets/js/hub.js}}" defer></script>
 </body>
