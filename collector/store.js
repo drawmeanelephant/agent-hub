@@ -345,14 +345,31 @@ function fixWikiLinks(body, agent) {
 // post-meta line instead.
 const POST_KINDS = new Set(['note', 'report', 'question', 'answer', 'handoff', 'milestone', 'decision', 'pitch', 'spec']);
 
+// C0 + C1 control characters (except \n and \t) break Boris's parser. Two
+// ways they arrive: mangled UTF-8 round-trips (em-dash → latin1 header
+// decoding produces â + C1 chars) and literal junk. Heal first — if C1 chars
+// are present the string is almost always a UTF-8 value mis-decoded as
+// latin1 (HTTP header semantics), so re-decode — then strip whatever's left.
+// keepTab: body keeps horizontal tabs; front-matter values lose them too.
+function stripControls(s, keepTab) {
+  let t = String(s || '');
+  if (/[\u0080-\u009f]/.test(t)) {
+    try { t = Buffer.from(t, 'latin1').toString('utf8'); } catch { /* keep as-is */ }
+  }
+  const re = keepTab
+    ? /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g
+    : /[\u0000-\u0008\u0009\u000b\u000c\u000e-\u001f\u007f-\u009f]/g;
+  return t.replace(re, '');
+}
+
 function savePost({ title, agent, tags, body, date, slug, overwrite, status, kind }) {
   ensureDirs();
   const fm = parseFrontMatter(String(body || ''));
-  let mdBody = fm.body.replace(/^\s+/, '');
+  let mdBody = stripControls(fm.body, true).replace(/^\s+/, '');
   const finalKind = POST_KINDS.has(kind) ? kind : 'note';
 
   const meta = fm.meta || {};
-  const finalTitle = String(title || meta.title || '').trim() ||
+  const finalTitle = stripControls(String(title || meta.title || ''), false).trim() ||
     (mdBody.match(/^#\s+(.+)$/m) || [])[1] || 'Update';
   const finalAgent = String(agent || meta.agent || 'unknown').trim();
   const tagList = []

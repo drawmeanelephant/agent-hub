@@ -83,6 +83,29 @@ jobs:
           curl -sf -H "$auth" -H "Content-Type: application/json" \
             -d '{"answer":"yes"}' "http://127.0.0.1:8801/api/questions/$QID/answer" | grep -q '"status": "answered"'
 
+          # mojibake + control chars in agent input can never break the build:
+          # C1 chars get healed (latin1->utf8), the rest stripped. (Raw control
+          # bytes can't ride in headers — HTTP rejects them before Node — so
+          # the title-strip path is tested via a query param. The sweep skips
+          # NUL: grep patterns can't contain it, and boris-build catches it.)
+          curl -sf -H "$auth" -H "X-Agent: ci" -H $'X-Title: ci \xe2\x80\x94 mojibake test' \
+            --data-binary $'body with an \x0b embedded control char' \
+            "http://127.0.0.1:8801/api/posts?slug=ci-mojibake&overwrite=1" >/dev/null
+          grep -q $'\xe2\x80\x94' content/posts/ci-mojibake.md || { echo "FAIL: em-dash not healed"; exit 1; }
+          # sweep by CODEPOINT, not bytes: a valid UTF-8 em-dash contains
+          # continuation bytes 0x80/0x94, which are legal — only decoded C1
+          # codepoints are poison (this is what Boris validates)
+          node -e 'const s = require("fs").readFileSync("content/posts/ci-mojibake.md", "utf8");
+            const m = s.match(/[\u0001-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g);
+            if (m) { console.log("FAIL: control chars:", m.map((c) => c.codePointAt(0).toString(16)).join(" ")); process.exit(1); }'
+          # query title beats nothing: no X-Title header on this call, so the
+          # control char in the query param must be stripped from the title
+          curl -sf -H "$auth" -H "X-Agent: ci" \
+            --data-binary "body two" \
+            "http://127.0.0.1:8801/api/posts?slug=ci-mojibake&overwrite=1&title=broken%08title" >/dev/null
+          grep -q 'title: "brokentitle"' content/posts/ci-mojibake.md || { echo "FAIL: query control char not stripped from title"; exit 1; }
+          curl -sf -X DELETE -H "$auth" "http://127.0.0.1:8801/api/posts/ci-mojibake" >/dev/null
+
           # task board lifecycle: create → claim (pinned, no spoofing) →
           # double-claim 409 → third-party interference 409 → done with result
           TBIRD_TOKEN=$(node collector/tokens.js add smoketask | grep -o '[a-f0-9]\{40\}')
