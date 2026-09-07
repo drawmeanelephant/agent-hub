@@ -276,6 +276,36 @@
     return [...byName.values()].sort((a, b) => String(b.lastSeen || "").localeCompare(String(a.lastSeen || "")));
   };
 
+  /* ---------- shared task board ---------- */
+
+  const taskGlyph = (st) => (st === "done" ? "✓" : st === "claimed" ? "◐" : "○");
+
+  const taskRow = (t) =>
+    '<li class="feed-item"><span class="feed-item__glyph">' + taskGlyph(t.status) + "</span>" +
+    '<div class="feed-item__body"><div class="feed-item__text">' + esc(t.title) + "</div>" +
+    '<div class="feed-item__sub">' +
+    (t.status === "claimed" && t.claimedBy ? agentChip(t.claimedBy) + " " : "") +
+    esc(t.createdBy || "") + " · " + relTime(t.updatedAt) +
+    (t.status === "done" && t.result ? " · " + esc(t.result) : "") +
+    "</div></div>" +
+    '<span class="feed-item__time">' + esc(t.status) + "</span></li>";
+
+  const taskBoard = (allTasks) => {
+    const open = allTasks.filter((t) => t.status === "open");
+    const claimed = allTasks.filter((t) => t.status === "claimed");
+    const done = allTasks.filter((t) => t.status === "done").slice(0, 5);
+    const input =
+      '<div class="q-answer-row" style="margin:0 0 12px">' +
+      '<input type="text" class="q-answer-input task-title-input" placeholder="add a task for the fleet…">' +
+      '<button type="button" class="q-answer-btn task-add-btn">Add task</button>' +
+      '<span class="q-answer-msg task-add-msg" role="status" aria-live="polite"></span></div>';
+    const rows = open.map(taskRow).concat(claimed.map(taskRow)).concat(done.map(taskRow));
+    return input +
+      (rows.length
+        ? '<ul class="feed-list">' + rows.join("") + "</ul>"
+        : emptyBox('no tasks yet — <code>POST /api/tasks {"title": "…"}</code>, claim with <code>/api/tasks/&lt;id&gt;/claim</code>'));
+  };
+
   /* ---------- questions-for-humans board ---------- */
 
   const ADMIN_KEY = "hub-admin-token";
@@ -312,7 +342,7 @@
       "</div></li>";
   };
 
-  const renderDashboard = (status, posts, images, fleetPosted, allQuestions) => {
+  const renderDashboard = (status, posts, images, fleetPosted, allQuestions, allTasks) => {
     const gh = (status && status.github) || {};
     const local = (status && status.local) || {};
     const acts = (status && status.activity && status.activity.events) || [];
@@ -370,6 +400,14 @@
       : emptyBox('no agents seen yet — agents report via <code>POST /api/agents/status</code>');
     html += section("Fleet", "who is doing what · <code>POST /api/agents/status</code>", fleet);
 
+    const tAll = allTasks || [];
+    const taskHint = tAll.length
+      ? ((status.tasks && status.tasks.open) || tAll.filter((t) => t.status === "open").length) + " open · " +
+        ((status.tasks && status.tasks.claimed) || tAll.filter((t) => t.status === "claimed").length) + " claimed" +
+        ' · <code>POST /api/tasks</code>'
+      : 'create + claim via <code>POST /api/tasks</code>';
+    html += section("Task board", taskHint, taskBoard(tAll));
+
     const qs = allQuestions || [];
     const qOpen = qs.filter((q) => q.status === "open");
     const qAnswered = qs.filter((q) => q.status === "answered");
@@ -400,6 +438,38 @@
   const initDashboard = () => {
     setBodyWide();
 
+    // inline add-task flow: admin token (prompted once, then remembered) →
+    // POST /api/tasks — claims/transitions stay agent-side, by design
+    dashRoot.addEventListener("click", async (e) => {
+      const btn = e.target.closest(".task-add-btn");
+      if (!btn) return;
+      const row = btn.closest(".q-answer-row");
+      const input = row.querySelector(".task-title-input");
+      const msg = row.querySelector(".task-add-msg");
+      const title = input ? input.value.trim() : "";
+      if (!title) { msg.textContent = "give the task a title first"; return; }
+      const token = adminToken();
+      if (!token) { msg.textContent = "admin token required"; return; }
+      btn.disabled = true;
+      try {
+        const res = await fetch(BASE + "/api/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+          body: JSON.stringify({ title })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 401 || res.status === 403) {
+          try { localStorage.removeItem(ADMIN_KEY); } catch { /* storage blocked */ }
+        }
+        if (!res.ok) throw new Error(data.error || "HTTP " + res.status);
+        input.value = "";
+        msg.textContent = "added ✓";
+        load();
+      } catch (err) {
+        msg.textContent = String(err.message || err);
+      } finally { btn.disabled = false; }
+    });
+
     // inline answer flow: delegated click → admin token (prompted once, then
     // remembered in localStorage) → POST /api/questions/<id>/answer
     const postAnswer = async (id, text, msgEl) => {
@@ -425,7 +495,7 @@
 
     dashRoot.addEventListener("click", (e) => {
       const btn = e.target.closest(".q-answer-btn");
-      if (!btn) return;
+      if (!btn || btn.classList.contains("task-add-btn")) return;
       const row = btn.closest(".q-answer-row");
       const item = btn.closest("[data-qid]");
       const input = row.querySelector(".q-answer-input");
@@ -442,14 +512,15 @@
       if (inFlight) return;
       inFlight = true;
       try {
-        const [status, posts, images, fleet, qdata] = await Promise.all([
+        const [status, posts, images, fleet, qdata, tdata] = await Promise.all([
           fetchJSON("/api/status"),
           fetchJSON("/api/posts").catch(() => ({ posts: [] })),
           fetchJSON("/api/images").catch(() => ({ images: [] })),
           fetchJSON("/api/agents").catch(() => ({ agents: [] })),
-          fetchJSON("/api/questions?status=all").catch(() => ({ questions: [] }))
+          fetchJSON("/api/questions?status=all").catch(() => ({ questions: [] })),
+          fetchJSON("/api/tasks?status=all").catch(() => ({ tasks: [] }))
         ]);
-        renderDashboard(status, posts.posts || [], images.images || [], fleet.agents || [], qdata.questions || []);
+        renderDashboard(status, posts.posts || [], images.images || [], fleet.agents || [], qdata.questions || [], tdata.tasks || []);
       } catch {
         dashRoot.innerHTML = '<div class="empty">collector unreachable at <code>' +
           esc(BASE) + "</code> — is the hub running? <code>./start.sh</code></div>";

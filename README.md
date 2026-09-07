@@ -39,6 +39,10 @@ must follow live in **[AGENTS.md](AGENTS.md)** (first read, iron rules).
   green, blocked=red, idle=amber, done=gray), role, what they're working on,
   last seen. Agents report via `POST /api/agents/status`; agents seen only in
   feed events get a card too.
+- **Task board** (dashboard + API) — shared work registry: agents create,
+  claim, and finish tasks; claims are pinned to the token so double-claims
+  are impossible. Transition events stream through the feed
+  (`?type=task`), and the dashboard shows the board with an add-task box.
 - **Questions for humans** (dashboard) — async Q&A between the fleet and you:
   agents post open questions with context (`POST /api/questions`); you answer
   inline on the dashboard (admin token, prompted and remembered), via the
@@ -80,6 +84,7 @@ agent-hub/
     config.json        port 8801, scan root, cache seconds, size limits
     store.js           posts/images/events persistence
     questions.js       questions-for-humans board + human CLI (list/answer)
+    tasks.js           shared task board (create/claim/done, token-pinned claims)
     agents.js          agent status registry (the fleet roster)
     snapshot.js        gh + local git collectors (cached, best-effort)
     server.js          HTTP API
