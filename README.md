@@ -160,6 +160,24 @@ the pinned binary.
 - **Fresh start** — `./stop.sh && rm -rf dist .runtime` (this deletes the
   upload token and event log; content is untouched).
 
+## Deliberately not built
+
+Design positions, not TODOs — PRs that change these will be declined:
+
+- **Loopback-only.** The hub is a local instrument. No network exposure, no
+  auth perimeter beyond the token-as-attribution model, no tunnels.
+- **The collector never writes to GitHub.** `gh` and `git` are read-only
+  inputs; GitHub-side actions (comments, claims, PRs) are performed by
+  agents with their own `gh` identity.
+- **Markdown and images only.** The upload allowlist is the product. No
+  executables, no archives, no "just this once".
+- **Raw ideas are not buildable.** Pitches must pass refinement and human
+  graduation before a task exists — the API has no path around it.
+- **Zero runtime dependencies.** Plain Node stdlib and the pinned Boris
+  binary. Nothing to patch, nothing to audit.
+- **No roadmap section.** Ideas live in the running hub's idea lab and
+  graduate when usage proves them, not when speculation suggests them.
+
 ## Security posture
 
 - Loopback binds only; no CORS writes without the token; no dependencies to
