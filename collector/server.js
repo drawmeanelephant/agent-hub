@@ -11,6 +11,7 @@ const snapshot = require('./snapshot');
 const buildstate = require('./buildstate');
 const questions = require('./questions');
 const agents = require('./agents');
+const tasks = require('./tasks');
 
 const CFG = { ...JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8')), ROOT: store.ROOT };
 const STARTED = Date.now();
@@ -257,6 +258,69 @@ async function handle(req, res) {
     }, req, started);
   }
 
+  // ---- shared task board ----
+  if (method === 'GET' && p === '/api/tasks') {
+    const status = url.searchParams.get('status') || 'all';
+    if (!['open', 'claimed', 'done', 'mine', 'all'].includes(status)) {
+      return err(res, 400, '?status= must be open, claimed, done, mine, or all', req, started);
+    }
+    let rows;
+    if (status === 'mine') {
+      const tok = authorized(req, url);
+      if (!tok) return err(res, 401, 'unauthorized — ?status=mine needs a token', req, started);
+      rows = tasks.listTasks('all').filter((t) => t.claimedBy === tok.name || t.createdBy === tok.name);
+    } else {
+      rows = tasks.listTasks(status);
+    }
+    return json(res, 200, {
+      ok: true,
+      counts: tasks.countsByStatus(),
+      count: rows.length,
+      tasks: rows,
+    }, req, started);
+  }
+
+  if (method === 'POST' && p === '/api/tasks') {
+    const tok = authorized(req, url);
+    if (!tok) return err(res, 401, 'unauthorized — pass an upload token', req, started);
+    let obj;
+    try { obj = JSON.parse((await readBody(req, 65536)).toString('utf8') || '{}'); } catch { return err(res, 400, 'invalid JSON body', req, started); }
+    try {
+      const by = pickAgent(req, url, obj, tok.name);
+      const t = tasks.addTask({ title: obj.title, detail: obj.detail, createdBy: by });
+      store.addEvent({ agent: t.createdBy, type: 'task', message: 'created task "' + t.title.slice(0, 120) + '" (' + t.id + ')' });
+      return json(res, 201, { ok: true, task: t }, req, started);
+    } catch (e) {
+      return err(res, 400, String(e.message || e), req, started);
+    }
+  }
+
+  const tm = /^\/api\/tasks\/([a-z0-9][a-z0-9-]*)\/(claim|release|done|delete)$/.exec(p);
+  if (method === 'POST' && tm) {
+    const tok = authorized(req, url);
+    if (!tok) return err(res, 401, 'unauthorized — pass an upload token', req, started);
+    let obj = {};
+    try { obj = JSON.parse((await readBody(req, 65536)).toString('utf8') || '{}'); } catch { /* body optional */ }
+    // claims/transitions are pinned to the token identity — no spoofing
+    const by = tok.name;
+    const act = tm[2];
+    try {
+      const t = act === 'claim' ? tasks.claimTask(tm[1], { by })
+        : act === 'release' ? tasks.releaseTask(tm[1], { by })
+        : act === 'done' ? tasks.completeTask(tm[1], { by, result: obj.result })
+        : tasks.deleteTask(tm[1], { by });
+      if (!t) return err(res, 404, 'no such task', req, started);
+      const label = '"' + t.title.slice(0, 120) + '" (' + t.id + ')';
+      if (act === 'claim') store.addEvent({ agent: t.claimedBy, type: 'task', message: 'claimed task ' + label });
+      else if (act === 'release') store.addEvent({ agent: by, type: 'task', message: 'released task ' + label });
+      else if (act === 'done') store.addEvent({ agent: t.claimedBy, type: 'task', message: 'finished task ' + label + (t.result ? ' — ' + t.result.slice(0, 100) : '') });
+      else store.addEvent({ agent: by, type: 'task', message: 'deleted task ' + label });
+      return json(res, act === 'claim' ? 201 : 200, { ok: true, task: t }, req, started);
+    } catch (e) {
+      return err(res, 409, String(e.message || e), req, started);
+    }
+  }
+
   // ---- status (dashboard + agents) ----
   if (method === 'GET' && p === '/api/status') {
     store.syncGeneratedDocs(); // keep on-site docs pages in sync with the sources
@@ -267,6 +331,7 @@ async function handle(req, res) {
       site: { name: CFG.siteName, generatedAt: new Date().toISOString(), uptimeSec: Math.round((Date.now() - STARTED) / 1000) },
       counts: store.counts(),
       openQuestions: questions.openCount(),
+      tasks: tasks.countsByStatus(),
       build: await buildstate.buildState(),
       tokens: store.listTokens().map((t) => ({ name: t.name, created: t.created, lastUsed: t.lastUsed })),
       github: { ...snap.github, fetchedAt: snapshot.snapshotAge() === null ? null : new Date(Date.now() - (snapshot.snapshotAge() || 0)).toISOString() },
@@ -287,6 +352,8 @@ async function handle(req, res) {
       ? new Set(url.searchParams.get('agent').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)) : null;
     const kinds = url.searchParams.get('kind')
       ? new Set(url.searchParams.get('kind').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)) : null;
+    const evTypes = url.searchParams.get('event')
+      ? new Set(url.searchParams.get('event').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)) : null;
     const ic = imageCountMap();
     const items = [];
     for (const post of store.listPosts()) {
@@ -300,14 +367,15 @@ async function handle(req, res) {
       .filter((i) => (Number.isFinite(sinceTs) ? Date.parse(i.ts) > sinceTs : true))
       .filter((i) => (types ? types.has(i.type) : true))
       .filter((i) => (agentsF ? (i.agent && agentsF.has(String(i.agent).toLowerCase())) : true))
-      .filter((i) => (kinds ? (i.type === 'post' && kinds.has(String(i.kind || 'note'))) : true));
+      .filter((i) => (kinds ? (i.type === 'post' && kinds.has(String(i.kind || 'note'))) : true))
+      .filter((i) => (evTypes ? (i.type === 'event' && evTypes.has(String(i.event || ''))) : true));
     return json(res, 200, {
       ok: true,
       now: new Date().toISOString(),
       count: filtered.slice(0, limit).length, // size of THIS batch — trust this
       total: filtered.length,                 // everything matching (backlog)
       items: filtered.slice(0, limit),
-      poll: 'pass ?since=<latest-ts> for only newer items; narrow with ?type=post,image,event, ?agent=<name>, ?kind=<post-kind>',
+      poll: 'pass ?since=<latest-ts> for only newer items; narrow with ?type=post,image,event, ?agent=<name>, ?kind=<post-kind>, ?event=<event-kind>',
     }, req, started);
   }
 
