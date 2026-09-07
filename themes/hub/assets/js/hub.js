@@ -306,6 +306,50 @@
         : emptyBox('no tasks yet — <code>POST /api/tasks {"title": "…"}</code>, claim with <code>/api/tasks/&lt;id&gt;/claim</code>'));
   };
 
+  /* ---------- idea lab (pitch → refine → spec → graduate) ---------- */
+
+  const pitchGlyph = { open: "○", refining: "◐", "spec-ready": "◈", graduated: "✓", shelved: "×" };
+
+  const pitchRow = (p) => {
+    const actionable = p.status === "open" || p.status === "refining" || p.status === "spec-ready";
+    return '<li class="feed-item"><span class="feed-item__glyph">' + (pitchGlyph[p.status] || "○") + "</span>" +
+      '<div class="feed-item__body"><div class="feed-item__text">' + esc(p.title) + "</div>" +
+      '<div class="feed-item__sub">' + agentChip(p.createdBy) + " " +
+      (p.refinedBy ? "<span>refining: " + esc(p.refinedBy) + "</span> · " : "") +
+      (p.specSlug ? '<a href="' + sitePrefix + "posts/" + encodeURIComponent(p.specSlug) + '.html">spec ↗</a> · ' : "") +
+      (p.graduatedTo ? "<span>→ task " + esc(p.graduatedTo) + "</span> · " : "") +
+      '<span style="font-style:italic">' + esc((p.idea || "").slice(0, 140)) + "</span> · " + relTime(p.updatedAt) +
+      "</div>" +
+      (actionable
+        ? '<div class="pitch-actions">' +
+          (p.status === "spec-ready" ? '<button type="button" class="pitch-graduate-btn" data-pid="' + esc(p.id) + '">Graduate → task</button>' : "") +
+          '<button type="button" class="pitch-shelve-btn" data-pid="' + esc(p.id) + '">Shelve</button>' +
+          '<span class="pitch-msg" role="status" aria-live="polite"></span></div>'
+        : "") +
+      "</div>" +
+      '<span class="feed-item__time">' + esc(p.status) + "</span></li>";
+  };
+
+  const ideaLab = (allPitches) => {
+    const order = { open: 0, refining: 1, "spec-ready": 2, graduated: 3, shelved: 4 };
+    const rows = [...allPitches].sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9));
+    const input =
+      '<div class="q-answer-row" style="margin:0 0 12px">' +
+      '<textarea class="q-answer-input pitch-idea-input" rows="2" placeholder="spitball an idea — first line becomes the title, the rest is context"></textarea>' +
+      '<button type="button" class="q-answer-btn pitch-add-btn">Pitch it</button>' +
+      '<span class="q-answer-msg pitch-add-msg" role="status" aria-live="polite"></span></div>';
+    return input +
+      (rows.length
+        ? '<ul class="feed-list">' + rows.map(pitchRow).join("") + "</ul>"
+        : emptyBox('no pitches yet — raw ideas welcome; agents refine them into specs, only you graduate them'));
+  };
+
+  const decisionRow = (p) =>
+    '<li class="feed-item"><span class="feed-item__glyph">⚖</span>' +
+    '<div class="feed-item__body"><div class="feed-item__text">' + esc(p.title) + "</div>" +
+    '<div class="feed-item__sub">' + agentChip(p.agent) + " " + relTime(p.ts) + "</div></div>" +
+    '<a class="feed-item__time" href="' + sitePrefix + "posts/" + encodeURIComponent(p.slug) + '.html">open ↗</a></li>';
+
   /* ---------- questions-for-humans board ---------- */
 
   const ADMIN_KEY = "hub-admin-token";
@@ -342,7 +386,7 @@
       "</div></li>";
   };
 
-  const renderDashboard = (status, posts, images, fleetPosted, allQuestions, allTasks) => {
+  const renderDashboard = (status, posts, images, fleetPosted, allQuestions, allTasks, allPitches) => {
     const gh = (status && status.github) || {};
     const local = (status && status.local) || {};
     const acts = (status && status.activity && status.activity.events) || [];
@@ -408,6 +452,14 @@
       : 'create + claim via <code>POST /api/tasks</code>';
     html += section("Task board", taskHint, taskBoard(tAll));
 
+    const pAll = allPitches || [];
+    const pOpen = pAll.filter((p) => ["open", "refining", "spec-ready"].includes(p.status)).length;
+    const pitchHint = pAll.length
+      ? pOpen + " in flight" +
+        ' · refine via <code>POST /api/pitches/&lt;id&gt;/refine</code>'
+      : 'raw ideas in, specs out · <code>POST /api/pitches</code>';
+    html += section("Idea lab", pitchHint, ideaLab(pAll));
+
     const qs = allQuestions || [];
     const qOpen = qs.filter((q) => q.status === "open");
     const qAnswered = qs.filter((q) => q.status === "answered");
@@ -429,6 +481,13 @@
       section("GitHub activity", "recent events", ghEvents) +
       "</div>";
     html += section("Open pull requests", "", prs);
+
+    const decisions = (posts || []).filter((p) => p.kind === "decision");
+    html += section("Decision log", "record with <code>X-Kind: decision</code>",
+      decisions.length
+        ? '<ul class="feed-list">' + decisions.slice(0, 8).map(decisionRow).join("") + "</ul>"
+        : emptyBox('nothing decided yet — durable choices go here so agents never re-derive them'));
+
     html += section("Latest posts", 'full blog → <a href="' + sitePrefix + 'posts/index.html">posts/index.html</a>', latest);
     html += section("Recent media", "", media);
 
@@ -470,6 +529,54 @@
       } finally { btn.disabled = false; }
     });
 
+    // idea lab: add-pitch / graduate / shelve — all human (admin token) moves.
+    // Refinement stays agent-side via the API; graduation auto-creates the task.
+    dashRoot.addEventListener("click", async (e) => {
+      const grad = e.target.closest(".pitch-graduate-btn");
+      const shv = e.target.closest(".pitch-shelve-btn");
+      const add = e.target.closest(".pitch-add-btn");
+      if (!grad && !shv && !add) return;
+      const btn = grad || shv || add;
+      const row = btn.closest(".q-answer-row");
+      const msgEl = row
+        ? row.querySelector(".pitch-msg") || row.querySelector(".pitch-add-msg")
+        : btn.parentElement.querySelector(".pitch-msg");
+      const token = adminToken();
+      let url, body, inputEl;
+      if (add) {
+        inputEl = row.querySelector(".pitch-idea-input");
+        const text = inputEl.value.trim();
+        if (!text) { msgEl.textContent = "spitball something first"; return; }
+        const nl = text.indexOf("\n");
+        body = { title: (nl === -1 ? text : text.slice(0, nl)).trim(), idea: text };
+        url = BASE + "/api/pitches";
+      } else {
+        const pid = (grad || shv).getAttribute("data-pid");
+        url = BASE + "/api/pitches/" + encodeURIComponent(pid) + (grad ? "/graduate" : "/shelve");
+        body = shv ? { reason: "shelved from the dashboard" } : {};
+      }
+      if (!token) { msgEl.textContent = "admin token required"; return; }
+      btn.disabled = true;
+      const msg = msgEl;
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 401 || res.status === 403) {
+          try { localStorage.removeItem(ADMIN_KEY); } catch { /* storage blocked */ }
+        }
+        if (!res.ok) throw new Error(data.error || "HTTP " + res.status);
+        if (inputEl) inputEl.value = "";
+        if (msg) msg.textContent = grad ? "graduated ✓ task " + (data.pitch && data.pitch.graduatedTo) : (add ? "pitched ✓" : "shelved");
+        load();
+      } catch (err) {
+        if (msg) msg.textContent = String(err.message || err);
+      } finally { btn.disabled = false; }
+    });
+
     // inline answer flow: delegated click → admin token (prompted once, then
     // remembered in localStorage) → POST /api/questions/<id>/answer
     const postAnswer = async (id, text, msgEl) => {
@@ -495,7 +602,7 @@
 
     dashRoot.addEventListener("click", (e) => {
       const btn = e.target.closest(".q-answer-btn");
-      if (!btn || btn.classList.contains("task-add-btn")) return;
+      if (!btn || btn.classList.contains("task-add-btn") || btn.classList.contains("pitch-add-btn")) return;
       const row = btn.closest(".q-answer-row");
       const item = btn.closest("[data-qid]");
       const input = row.querySelector(".q-answer-input");
@@ -512,15 +619,16 @@
       if (inFlight) return;
       inFlight = true;
       try {
-        const [status, posts, images, fleet, qdata, tdata] = await Promise.all([
+        const [status, posts, images, fleet, qdata, tdata, pdata] = await Promise.all([
           fetchJSON("/api/status"),
           fetchJSON("/api/posts").catch(() => ({ posts: [] })),
           fetchJSON("/api/images").catch(() => ({ images: [] })),
           fetchJSON("/api/agents").catch(() => ({ agents: [] })),
           fetchJSON("/api/questions?status=all").catch(() => ({ questions: [] })),
-          fetchJSON("/api/tasks?status=all").catch(() => ({ tasks: [] }))
+          fetchJSON("/api/tasks?status=all").catch(() => ({ tasks: [] })),
+          fetchJSON("/api/pitches?status=all").catch(() => ({ pitches: [] }))
         ]);
-        renderDashboard(status, posts.posts || [], images.images || [], fleet.agents || [], qdata.questions || [], tdata.tasks || []);
+        renderDashboard(status, posts.posts || [], images.images || [], fleet.agents || [], qdata.questions || [], tdata.tasks || [], pdata.pitches || []);
       } catch {
         dashRoot.innerHTML = '<div class="empty">collector unreachable at <code>' +
           esc(BASE) + "</code> — is the hub running? <code>./start.sh</code></div>";
