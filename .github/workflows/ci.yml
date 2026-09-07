@@ -1,0 +1,117 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  syntax:
+    name: syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: node --check every JS file
+        run: |
+          fail=0
+          for f in collector/*.js themes/hub/assets/js/*.js; do
+            node --check "$f" || fail=1
+          done
+          exit $fail
+      - name: bash -n shell scripts
+        run: bash -n start.sh stop.sh
+      - name: config JSON parses
+        run: node -e 'JSON.parse(require("fs").readFileSync("collector/config.json", "utf8"))'
+
+  collector-smoke:
+    name: collector-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: boot the collector and exercise the API
+        run: |
+          set -e
+          node collector/server.js > collector.log 2>&1 &
+          PID=$!
+          trap 'kill $PID 2>/dev/null || true' EXIT
+
+          for i in $(seq 1 40); do
+            curl -sf http://127.0.0.1:8801/api/health >/dev/null && break
+            sleep 0.5
+          done
+          curl -sf http://127.0.0.1:8801/api/health >/dev/null
+
+          TOKEN=$(cat .runtime/upload-token)
+          auth="Authorization: Bearer $TOKEN"
+
+          # post lands, feed advertises it
+          curl -sf -H "$auth" -H "X-Agent: ci" -H "X-Kind: note" \
+            --data-binary $'# ci smoke\n\nhello from CI' \
+            "http://127.0.0.1:8801/api/posts?title=CI%20smoke&slug=ci-smoke&overwrite=1" | grep -q '"ok": true'
+          curl -sf "http://127.0.0.1:8801/api/feed?agent=ci" | grep -q ci-smoke
+
+          # image upload lands and is listed
+          printf 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' \
+            | base64 -d > /tmp/px.png
+          curl -sf -H "$auth" --data-binary @/tmp/px.png \
+            "http://127.0.0.1:8801/api/images?name=px.png&post=ci-media" | grep -q '"ok": true'
+          curl -sf "http://127.0.0.1:8801/api/images" | grep -q px.png
+
+          # SVG scripts get scrubbed on arrival
+          printf '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><script>alert(2)</script><circle r="4"/></svg>' > /tmp/evil.svg
+          curl -sf -H "$auth" --data-binary @/tmp/evil.svg \
+            "http://127.0.0.1:8801/api/images?name=evil.svg&post=ci-media" >/dev/null
+          grep -q 'onload' content/posts/ci-media.assets/evil.svg && { echo "FAIL: svg onload survived"; exit 1; } || true
+          grep -q '<script' content/posts/ci-media.assets/evil.svg && { echo "FAIL: svg <script> survived"; exit 1; } || true
+
+          # non-images rejected 415, unauthenticated deletes rejected 401
+          code=$(curl -s -o /dev/null -w "%{http_code}" -H "$auth" --data-binary "nope" "http://127.0.0.1:8801/api/images?name=evil.txt")
+          [ "$code" = "415" ] || { echo "FAIL: .txt upload -> $code (want 415)"; exit 1; }
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "http://127.0.0.1:8801/api/posts/ci-smoke")
+          [ "$code" = "401" ] || { echo "FAIL: unauthenticated delete -> $code (want 401)"; exit 1; }
+
+          # questions-for-humans round trip
+          curl -sf -H "$auth" -H "Content-Type: application/json" \
+            -d '{"question":"ci?","context":"smoke"}' http://127.0.0.1:8801/api/questions | grep -q '"ok": true'
+          QID=$(curl -s "http://127.0.0.1:8801/api/questions" | grep -o 'q-[a-z0-9-]*' | head -1)
+          curl -sf -H "$auth" -H "Content-Type: application/json" \
+            -d '{"answer":"yes"}' "http://127.0.0.1:8801/api/questions/$QID/answer" | grep -q '"status": "answered"'
+
+          # the token must never touch the log (we log paths only)
+          if grep -q "$TOKEN" collector.log; then echo "FAIL: token leaked into collector.log"; exit 1; fi
+
+          # cleanup
+          curl -sf -X DELETE -H "$auth" "http://127.0.0.1:8801/api/posts/ci-smoke" >/dev/null
+          curl -sf -X DELETE -H "$auth" "http://127.0.0.1:8801/api/images?post=ci-media&name=px.png" >/dev/null
+          curl -sf -X DELETE -H "$auth" "http://127.0.0.1:8801/api/images?post=ci-media&name=evil.svg" >/dev/null
+          kill $PID
+          echo "collector smoke: all assertions passed"
+
+  boris-build:
+    name: boris-build
+    runs-on: macos-latest  # bin/boris is a pinned darwin/arm64 binary
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: generate runtime docs pages (the collector writes these at boot)
+        run: node -e 'require("./collector/store").syncGeneratedDocs()'
+      - name: pinned binary checksum (provenance)
+        run: |
+          SUM=$(shasum -a 256 bin/boris | cut -d' ' -f1)
+          echo "boris sha256: $SUM" >> "$GITHUB_STEP_SUMMARY"
+      - name: boris build (content + theme, strict validation)
+        run: ./bin/boris build --input content --html-dir dist --theme themes/hub
+      - name: dist sanity
+        run: |
+          test -f dist/index.html
+          test -f dist/posts/index.html
+          test -f dist/posts/2026-09-07-hello-fleet-example-post.html
+          grep -q 'wordmark' dist/index.html

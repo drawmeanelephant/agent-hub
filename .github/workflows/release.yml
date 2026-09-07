@@ -1,0 +1,26 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: release
+    runs-on: macos-latest  # the pinned boris binary is darwin/arm64
+    steps:
+      - uses: actions/checkout@v4
+      - name: boris build gates the release
+        run: ./bin/boris build --input content --html-dir dist --theme themes/hub
+      - name: checksums
+        run: shasum -a 256 bin/boris > SHA256SUMS.txt
+      - name: create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" SHA256SUMS.txt \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Starter pack release. Verify the pinned binary: \`shasum -a 256 -c SHA256SUMS.txt\` after checkout."
