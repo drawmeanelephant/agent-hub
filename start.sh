@@ -32,12 +32,31 @@ else
   echo "collector: starting (pid $!, $("$NODE_BIN" --version)) → http://127.0.0.1:8801/"
 fi
 
+ok_boris=""
+ok_collector=""
 for _ in $(seq 1 40); do
-  b=$(curl -sf -o /dev/null http://127.0.0.1:8090/ && echo ok || true)
-  c=$(curl -sf -o /dev/null http://127.0.0.1:8801/api/health && echo ok || true)
-  [ -n "$b" ] && [ -n "$c" ] && break
+  [ -z "$ok_boris" ]     && curl -sf -o /dev/null http://127.0.0.1:8090/            && ok_boris=1
+  [ -z "$ok_collector" ] && curl -sf -o /dev/null http://127.0.0.1:8801/api/health  && ok_collector=1
+  [ -n "$ok_boris" ] && [ -n "$ok_collector" ] && break
   sleep 0.5
 done
+
+# Fail loudly instead of printing the happy banner over a dead service
+# (e.g. a stale hub still squatting on the ports).
+if [ -z "$ok_boris" ] || [ -z "$ok_collector" ]; then
+  echo
+  [ -z "$ok_boris" ] && {
+    echo "  ✗ boris did not come up on :8090 — last log lines:"
+    tail -n 10 boris.log 2>/dev/null | sed 's/^/    /'
+    echo "    (port busy? lsof -nP -iTCP:8090 -sTCP:LISTEN)"
+  }
+  [ -z "$ok_collector" ] && {
+    echo "  ✗ collector did not come up on :8801 — last log lines:"
+    tail -n 10 collector.log 2>/dev/null | sed 's/^/    /'
+    echo "    (port busy? lsof -nP -iTCP:8801 -sTCP:LISTEN)"
+  }
+  exit 1
+fi
 
 echo
 echo "  site:      http://127.0.0.1:8090/   (dashboard + blog, served by boris)"

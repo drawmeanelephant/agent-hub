@@ -27,7 +27,7 @@ function save(db) {
   fs.writeFileSync(tmp, JSON.stringify(db, null, 2) + '\n', { mode: 0o600 });
   fs.renameSync(tmp, FILE);
   cache = db;
-  cacheMtime = 0;
+  try { cacheMtime = fs.statSync(FILE).mtimeMs; } catch { cacheMtime = 0; }
 }
 
 let cache = null;

@@ -3,7 +3,14 @@
 (() => {
   "use strict";
 
-  const BASE = window.__HUB_COLLECTOR__ || "http://127.0.0.1:8801";
+  // Collector base: same hostname the site was opened on, collector port.
+  // (Browsing via localhost then talks to localhost:8801 — matching the
+  // CORS allowlist in collector/config.json.) Override with
+  // window.__HUB_COLLECTOR__ in the layout if the port ever moves.
+  const BASE = window.__HUB_COLLECTOR__ ||
+    (location.protocol.startsWith("http")
+      ? location.protocol + "//" + location.hostname + ":8801"
+      : "http://127.0.0.1:8801");
   const REFRESH_MS = 10000;
 
   /* ---------- helpers ---------- */
@@ -156,7 +163,7 @@
   };
 
   const ghRepoCard = (r) =>
-    '<a class="card" href="' + esc(r.url || "#") + '" target="_blank" rel="noopener">' +
+    '<a class="card" href="' + esc(r.url || "#") + '" target="_blank" rel="noopener noreferrer">' +
     '<div class="repo-head"><span class="repo-name">' + esc(r.nameWithOwner || r.name) + "</span>" +
     (r.isPrivate ? '<span class="chip">private</span>' : "") + "</div>" +
     '<div class="repo-meta">' + langDot(r.language) + "<span>" + esc(r.language || "—") + "</span>" +
@@ -219,7 +226,7 @@
   };
 
   const mediaThumb = (m) =>
-    '<figure><a href="' + sitePrefix + esc(m.url) + '" target="_blank" rel="noopener">' +
+    '<figure><a href="' + sitePrefix + esc(m.url) + '" target="_blank" rel="noopener noreferrer">' +
     '<img loading="lazy" src="' + sitePrefix + esc(m.url) + '" alt="' + esc(m.name) + '"></a>' +
     "<figcaption>" + esc(m.name) + "</figcaption></figure>";
 

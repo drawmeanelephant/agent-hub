@@ -23,15 +23,29 @@ store.syncGeneratedDocs();
 // ---------------- helpers ----------------
 
 function log(req, code, ms) {
-  console.log(new Date().toISOString(), req.method, req.url, '->', code, '(' + ms + 'ms)');
+  // path only — tokens passed via ?token= must never land in the log
+  console.log(new Date().toISOString(), req.method, String(req.url || '').split('?')[0], '->', code, '(' + ms + 'ms)');
+}
+
+// CORS: the dashboard (Boris, :8090) polls this API cross-origin, so only the
+// configured site origins may READ responses. Anything else (random pages in
+// the browser) gets no ACAO header and is blocked by the browser.
+const SITE_ORIGINS = Array.isArray(CFG.siteOrigins) && CFG.siteOrigins.length
+  ? CFG.siteOrigins : ['http://127.0.0.1:8090', 'http://localhost:8090'];
+
+function corsHeaders(req) {
+  const origin = req && req.headers.origin;
+  return origin && SITE_ORIGINS.includes(origin)
+    ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' }
+    : {};
 }
 
 function json(res, code, obj, req, started) {
   const body = JSON.stringify(obj, null, 2);
   res.writeHead(code, {
     'Content-Type': 'application/json; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
     'Cache-Control': 'no-store',
+    ...corsHeaders(req),
   });
   res.end(body);
   if (req) log(req, code, started ? Date.now() - started : 0);
@@ -124,16 +138,16 @@ async function handle(req, res) {
 
   if (method === 'OPTIONS') {
     res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Agent, X-Slug, X-Title, X-Boris-Token',
       'Access-Control-Max-Age': '600',
+      ...corsHeaders(req),
     });
     return res.end();
   }
 
   // ---- health & index ----
-  if (method === 'GET' && p === '/api/health') return json(res, 200, { ok: true, uptimeSec: Math.round((Date.now() - STARTED) / 1000) });
+  if (method === 'GET' && p === '/api/health') return json(res, 200, { ok: true, uptimeSec: Math.round((Date.now() - STARTED) / 1000) }, req, started);
   if (method === 'GET' && p === '/') {
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('agent-hub collector\nsite: http://127.0.0.1:8090/  (boris)\napi:  http://127.0.0.1:8801/api/docs  (full contract, markdown)\nrules: http://127.0.0.1:8801/api/rules\n');
@@ -145,7 +159,7 @@ async function handle(req, res) {
     const file = p === '/api/docs' ? path.join(store.ROOT, 'API.md') : path.join(store.ROOT, 'AGENTS.md');
     let md;
     try { md = fs.readFileSync(file, 'utf8'); } catch { return err(res, 404, p + ' source missing', req, started); }
-    res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+    res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', ...corsHeaders(req) });
     res.end(md);
     return log(req, 200, Date.now() - started);
   }
@@ -334,7 +348,7 @@ async function handle(req, res) {
     const raw = store.getPostRaw(m[1]);
     if (raw == null) return err(res, 404, 'no such post', req, started);
     if (url.searchParams.get('format') === 'raw') {
-      res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+      res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', ...corsHeaders(req) });
       res.end(raw);
       return log(req, 200, Date.now() - started);
     }
@@ -355,7 +369,7 @@ async function handle(req, res) {
       let obj;
       try { obj = JSON.parse((await readBody(req, 65536)).toString('utf8') || '{}'); } catch { return err(res, 400, 'invalid JSON body', req, started); }
       if (!obj.message) return err(res, 400, 'missing "message"', req, started);
-      const ev = store.addEvent({ agent: obj.agent || (tok.name !== 'primary' ? tok.name : 'unknown'), type: obj.type || 'note', message: obj.message, meta: obj.meta });
+      const ev = store.addEvent({ agent: pickAgent(req, url, obj, tok.name), type: obj.type || 'note', message: obj.message, meta: obj.meta });
       return json(res, 201, { ok: true, event: ev }, req, started);
     }
 
@@ -517,7 +531,7 @@ const server = http.createServer((req, res) => {
 
 server.listen(CFG.port, CFG.host || '127.0.0.1', () => {
   console.log('agent-hub collector listening on http://' + (CFG.host || '127.0.0.1') + ':' + CFG.port);
-  console.log('site (boris): http://127.0.0.1:8090/  ·  token: ' + path.relative(store.ROOT, '.runtime/upload-token'));
+  console.log('site (boris): http://127.0.0.1:8090/  ·  token: .runtime/upload-token');
   store.addEvent({ agent: 'hub', type: 'hub', message: 'collector online on port ' + CFG.port });
 });
 

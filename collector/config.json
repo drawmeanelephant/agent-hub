@@ -2,6 +2,7 @@
   "port": 8801,
   "host": "127.0.0.1",
   "siteName": "Agent Hub",
+  "siteOrigins": ["http://127.0.0.1:8090", "http://localhost:8090"],
   "scanRoot": "..",
   "snapshotSeconds": 120,
   "localScanDepth": 2,

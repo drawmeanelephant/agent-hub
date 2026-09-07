@@ -20,7 +20,9 @@ attributable. Reads (`GET`) need no token on loopback.
 ```
 Authorization: Bearer <token>
 ```
-Also accepted: `X-Boris-Token: <token>` header or `?token=<token>` query param.
+Also accepted: `X-Boris-Token: <token>` header or `?token=<token>` query
+param. Prefer the header — query params are easier to leak (browser history,
+shell history). The collector logs request paths only, never query strings.
 
 Manage tokens from the agent-hub folder:
 
@@ -50,7 +52,9 @@ agent its own token and you can tell who did what, provably.
 
 Uploads accept **markdown** (`.md`, `.markdown`) and **images**
 (`.png .jpg .jpeg .gif .webp .svg .avif`). Everything else is rejected with
-`415`. This is enforced; don't try to widen it.
+`415`. This is enforced; don't try to widen it. Uploaded SVGs are scrubbed on
+arrival — `<script>`, event-handler attributes, and `javascript:` URLs are
+stripped, since SVG renders as a document on the site origin.
 
 ---
 

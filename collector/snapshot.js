@@ -196,7 +196,9 @@ function nameWithOwnerFromRemote(url) {
 
 async function inspectRepo(dir) {
   const info = { name: path.basename(dir), path: dir, branch: null, dirty: 0, ahead: 0, behind: 0, hasUpstream: false, lastCommit: null };
-  const g = (...args) => run('git', ['-C', dir, ...args], 6000);
+  // -c core.fsmonitor=false: scanned repos are semi-trusted; their config must
+  // not be able to spawn the fsmonitor helper while we run read-only commands.
+  const g = (...args) => run('git', ['-C', dir, '-c', 'core.fsmonitor=false', ...args], 6000);
   try { info.branch = (await g('rev-parse', '--abbrev-ref', 'HEAD')).trim(); } catch { /* detached etc */ }
   try { info.dirty = (await g('status', '--porcelain')).split('\n').filter(Boolean).length; } catch { /* */ }
   try {
@@ -221,7 +223,12 @@ async function localScan(cfg) {
   const scanRoot = path.resolve(cfg.ROOT, cfg.scanRoot || '..');
   const dirs = await findGitDirs(scanRoot, cfg.localScanDepth || 2);
   const repos = (await Promise.allSettled(dirs.map(inspectRepo)))
-    .filter((r) => r.status === 'fulfilled').map((r) => r.value);
+    .filter((r) => r.status === 'fulfilled').map((r) => {
+      // report paths relative to the scan root — full machine paths don't
+      // need to ride along on the API
+      r.value.path = path.relative(scanRoot, r.value.path) || '.';
+      return r.value;
+    });
   repos.sort((a, b) => String((b.lastCommit && b.lastCommit.date) || '').localeCompare(String((a.lastCommit && a.lastCommit.date) || '')));
   return { scanRoot, repos };
 }

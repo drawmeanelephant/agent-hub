@@ -100,6 +100,8 @@ function listTokens() {
 }
 
 // Returns { name } for a presented credential, else null. Constant-time per entry.
+// lastUsed is only persisted if it changed by >60s, so a busy agent polling
+// every few seconds doesn't rewrite tokens.json on every request.
 function resolveToken(candidate) {
   if (!candidate) return null;
   const data = loadTokens();
@@ -107,8 +109,11 @@ function resolveToken(candidate) {
   for (const [t, r] of Object.entries(data.tokens)) {
     const ht = crypto.createHash('sha256').update(t).digest();
     if (crypto.timingSafeEqual(h, ht)) {
-      r.lastUsed = new Date().toISOString();
-      saveTokens();
+      const now = Date.now();
+      if (!r.lastUsed || now - Date.parse(r.lastUsed) > 60000) {
+        r.lastUsed = new Date(now).toISOString();
+        saveTokens();
+      }
       return { name: r.name };
     }
   }
@@ -472,12 +477,27 @@ function ensurePageStub(page) {
   fs.writeFileSync(postPath(page), lines.join('\n') + '\n');
 }
 
+// SVG is served as a document by Boris on the site origin, so embedded
+// scripts (and the admin token in the dashboard's localStorage) demand a
+// scrub: drop <script>, event-handler attributes, javascript: URLs, and
+// foreignObject HTML before anything hits disk.
+function sanitizeSvg(buf) {
+  let s = buf.toString('utf8');
+  s = s.replace(/<script[\s\S]*?<\/script\s*>/gi, '')
+    .replace(/<script\b[^>]*\/?>/gi, '')
+    .replace(/<foreignObject[\s\S]*?<\/foreignObject\s*>/gi, '')
+    .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/((?:xlink:)?href\s*=\s*)("|')\s*javascript:[^"']*\2/gi, '$1"#"');
+  return Buffer.from(s, 'utf8');
+}
+
 function saveImage({ name, post, buf, overwrite }) {
   ensureDirs();
   const clean = sanitizeName(name);
   if (!clean || !clean.includes('.')) throw new Error('bad filename');
   const ext = path.extname(clean).toLowerCase();
   if (!IMAGE_EXT.has(ext)) throw new Error('images only (' + ext + ' not allowed)');
+  if (ext === '.svg') buf = sanitizeSvg(buf);
   const page = slugify(post || 'media') || 'media';
   const dir = assetsDir(page);
   fs.mkdirSync(dir, { recursive: true });
@@ -578,8 +598,19 @@ function addEvent({ agent, type, message, meta }) {
     message: String(message || '').slice(0, 300),
   };
   if (meta) entry.meta = meta;
-  fs.appendFileSync(EVENTS_FILE, JSON.stringify(entry) + '\n');
+  try { fs.appendFileSync(EVENTS_FILE, JSON.stringify(entry) + '\n'); } catch { /* best-effort */ }
+  trimEvents();
   return entry;
+}
+
+// The event log is append-only and would otherwise grow forever; when it
+// passes 2 MiB, keep only the most recent 1000 entries.
+function trimEvents() {
+  try {
+    if (fs.statSync(EVENTS_FILE).size <= 2 * 1024 * 1024) return;
+    const lines = fs.readFileSync(EVENTS_FILE, 'utf8').split('\n').filter(Boolean);
+    fs.writeFileSync(EVENTS_FILE, lines.slice(-1000).join('\n') + '\n');
+  } catch { /* best-effort */ }
 }
 
 function listEvents(limit = 50) {

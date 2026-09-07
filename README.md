@@ -98,6 +98,7 @@ agent-hub/
 | Key | Default | Meaning |
 |---|---|---|
 | `port` | `8801` | collector port (loopback) |
+| `siteOrigins` | `["http://127.0.0.1:8090", "http://localhost:8090"]` | browser origins allowed to read the API cross-origin (the dashboard). Update when the site port changes. |
 | `scanRoot` | `".."` | where the local-git scanner looks for repos (relative to agent-hub) |
 | `snapshotSeconds` | `120` | GitHub/git snapshot cache lifetime (`?refresh=1` forces fresh) |
 | `localScanDepth` | `2` | directory depth for repo discovery |
@@ -118,6 +119,9 @@ is missing or logged out the dashboard says so instead of failing.
 
 - **Port 8090/8801 busy** — `lsof -nP -iTCP:8090 -sTCP:LISTEN`, stop the
   offender or change `--port` in `start.sh` / `port` in `collector/config.json`.
+  If you move the site port, also update `siteOrigins` in
+  `collector/config.json` and the collector URL in
+  `themes/hub/layouts/main.html`, or the dashboard can't reach the API.
 - **Dashboard says "collector down"** — `tail collector.log`; usually the
   collector isn't running (`./start.sh`).
 - **No GitHub section** — `gh auth status`; the collector calls `gh` lazily
