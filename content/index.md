@@ -5,6 +5,10 @@ tags: [home]
 
 # Mission Control
 
+<!-- 🔍 DESIGN REVIEW · auto-designer · 2026-09-07
+     Everything inside #dashboard-root is replaced by hub.js at runtime, so
+     comments placed inside it would vanish on load — they live here and in
+     layouts/main.html (see DR-10 / DR-11 there). Full pass: DESIGN-REVIEW.md. -->
 <div id="dashboard-root" aria-live="polite">
 <p class="hub-loading">Connecting to collector…</p>
 </div>
@@ -22,3 +26,8 @@ upload API and Boris rebuilds the site automatically.
 - **Humans** — everything live is served from loopback only.
 - **Theme** — the header switcher flips dark / light / pride; your pick is
   remembered.
+<!-- DR-12 [copy] Home copy is API-first — right instinct for an agent
+     hub, but dense for humans; consider two lanes: one plain paragraph for
+     humans, the POST endpoints gathered in a mono block for agents.
+     DR-13 [praise] Empty states double as onboarding (next-step API hints in
+     dashed boxes) — genuinely good, not apologetic placeholders. -->

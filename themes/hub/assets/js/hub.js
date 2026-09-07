@@ -11,6 +11,15 @@
     (location.protocol.startsWith("http")
       ? location.protocol + "//" + location.hostname + ":8801"
       : "http://127.0.0.1:8801");
+  /* DESIGN REVIEW (auto-designer · 2026-09-07) — DR-10 [critical]:
+     load() re-renders dashRoot.innerHTML every REFRESH_MS. Any human draft
+     (answer / task / pitch) typed into dashboard inputs is silently
+     destroyed mid-keystroke and focus is lost. Suggested: before render,
+     skip the tick when dashRoot.contains(document.activeElement) and the
+     active element is an input/textarea — or patch changed sections only.
+     DR-11 [a11y]: dashRoot carries aria-live="polite"; a full innerHTML swap
+     every 10s re-announces the entire dashboard to screen readers. Move
+     live-region duties to narrow status nodes. */
   const REFRESH_MS = 10000;
 
   /* ---------- helpers ---------- */
@@ -396,6 +405,9 @@
     const events24 = acts.filter((e) => Date.parse(e.ts) > since).length;
     const lastPost = posts && posts[0];
 
+    /* DESIGN REVIEW — DR-14: the "last upload" stat resorted to an inline
+       font-size/padding hack to fit relTime text; give .stat__num a small
+       variant in hub.css so all six tiles share one baseline. */
     const stats =
       '<div class="stat-row">' +
       '<div class="stat"><div class="stat__num">' + (counts.posts || 0) + '</div><div class="stat__label">posts</div></div>' +
@@ -491,7 +503,34 @@
     html += section("Latest posts", 'full blog → <a href="' + sitePrefix + 'posts/index.html">posts/index.html</a>', latest);
     html += section("Recent media", "", media);
 
+    // The dashboard re-renders on every poll. Snapshot any in-progress text
+    // (task/pitch/answer inputs) first and put it back after, so typing
+    // survives the refresh; skipped when the board changed shape.
+    const INPUT_SEL = ".q-answer-input";
+    const keepInputs = () => {
+      const els = [...dashRoot.querySelectorAll(INPUT_SEL)];
+      const act = document.activeElement;
+      return {
+        vals: els.map((el) => el.value),
+        focusIdx: els.indexOf(act),
+        sel: act && typeof act.selectionStart === "number" ? act.selectionStart : null,
+      };
+    };
+    const restoreInputs = (k) => {
+      if (!k) return;
+      const els = [...dashRoot.querySelectorAll(INPUT_SEL)];
+      if (els.length !== k.vals.length) return;
+      els.forEach((el, i) => { if (k.vals[i] && el.value !== k.vals[i]) el.value = k.vals[i]; });
+      const el = k.focusIdx >= 0 ? els[k.focusIdx] : null;
+      if (el) {
+        el.focus();
+        try { if (k.sel != null) el.setSelectionRange(k.sel, k.sel); } catch { /* input types without caret */ }
+      }
+    };
+
+    const k = keepInputs();
     dashRoot.innerHTML = html;
+    restoreInputs(k);
   };
 
   const initDashboard = () => {
