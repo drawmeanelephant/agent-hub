@@ -119,6 +119,50 @@
     applyTheme(document.documentElement.dataset.theme || "dark");
   }
 
+  /* ---------- nav: true pulldown (click + touch + keyboard) ---------- */
+
+  const navRoot = document.querySelector(".site-nav");
+  if (navRoot) {
+    const closeAll = () => {
+      navRoot.querySelectorAll("li.nav-open").forEach((li) => {
+        li.classList.remove("nav-open");
+        const a = li.querySelector(":scope > a");
+        if (a) a.setAttribute("aria-expanded", "false");
+      });
+    };
+    // parents are any li with a nested ul (boris emits trunk > satellite uls)
+    navRoot.querySelectorAll("li > ul").forEach((sub) => {
+      const a = sub.parentElement.querySelector(":scope > a");
+      if (!a) return;
+      a.setAttribute("aria-haspopup", "true");
+      a.setAttribute("aria-expanded", "false");
+    });
+    navRoot.addEventListener("click", (e) => {
+      const link = e.target.closest("a");
+      if (!link) return;
+      const li = link.parentElement;
+      const sub = li.querySelector(":scope > ul");
+      if (!sub) {
+        closeAll();
+        return;
+      }
+      if (!li.classList.contains("nav-open")) {
+        e.preventDefault(); // first tap/click opens; next navigates
+        closeAll();
+        li.classList.add("nav-open");
+        link.setAttribute("aria-expanded", "true");
+      } else if (link === li.querySelector(":scope > a")) {
+        closeAll(); // second click on the parent closes (or navigates via keyboard go)
+      }
+    });
+    document.addEventListener("click", (e) => {
+      if (!navRoot.contains(e.target)) closeAll();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeAll();
+    });
+  }
+
   /* ---------- status pill ---------- */
 
   const statusEl = document.getElementById("hub-status");
@@ -231,7 +275,9 @@
   const tokensLine = (tokens) => {
     if (!tokens || !tokens.length) return "";
     return '<p class="feed-item__sub" style="margin:10px 0 0">api tokens: ' +
-      tokens.map((t) => esc(t.name) + (t.lastUsed ? " (" + relTime(t.lastUsed) + ")" : "")).join(" · ") + "</p>";
+      tokens.map((t) => esc(t.name) + (t.lastUsed ? " (" + relTime(t.lastUsed) + ")" : "")).join(" · ") +
+      '</p><p class="feed-item__sub" style="margin:4px 0 0">mint an agent token: <code>node collector/tokens.js add &lt;name&gt;</code>' +
+      ' · human/admin token: <code>cat .runtime/upload-token</code> · revoke: <code>node collector/tokens.js revoke &lt;name&gt;</code></p>';
   };
 
   const mediaThumb = (m) =>

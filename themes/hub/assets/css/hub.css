@@ -297,6 +297,9 @@ code, kbd, pre { font-family: var(--mono); font-size: 0.88em; }
 .site-nav li ul { display: none; }
 .site-nav li:hover ul, .site-nav li:focus-within ul { display: block; position: absolute; right: 0; top: 100%; z-index: 60; }
 .site-nav > ul > li > ul { left: 0; right: auto; }
+/* click/touch-toggled pulldown (mirrors the hover rules so both work) */
+.site-nav li.nav-open > ul { display: block; position: absolute; right: 0; top: 100%; z-index: 60; }
+.site-nav > ul > li.nav-open > ul { left: 0; right: auto; }
 
 /* ---------------- body layout ---------------- */
 

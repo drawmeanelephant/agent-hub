@@ -61,5 +61,6 @@ fi
 echo
 echo "  site:      http://127.0.0.1:8090/   (dashboard + blog, served by boris)"
 echo "  collector: http://127.0.0.1:8801/   (upload API for agents)"
-echo "  token:     $(cat "$RUN/upload-token" 2>/dev/null || echo '(not created yet — check collector.log)')"
+echo "  token:     $(cat "$RUN/upload-token" 2>/dev/null || echo '(not created yet — check collector.log)')   (human/admin)"
+echo "  agents:    node collector/tokens.js add <name>   (mint one per agent)"
 echo "  logs:      boris.log · collector.log   stop: ./stop.sh"
