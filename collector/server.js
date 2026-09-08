@@ -172,6 +172,15 @@ async function handle(req, res) {
     return json(res, 200, { ok: true, events: store.listEvents(limit) }, req, started);
   }
 
+  // ---- whoami: resolve a token to its pinned identity ----
+  if (method === 'GET' && p === '/api/whoami') {
+    const tok = authorized(req, url);
+    if (!tok) {
+      return json(res, 200, { ok: true, identity: null, hint: 'pass your token (Authorization: Bearer <token>) to see which agent name it maps to' }, req, started);
+    }
+    return json(res, 200, { ok: true, identity: tok.name, primary: tok.name === 'primary' }, req, started);
+  }
+
   // ---- build visibility ----
   if (method === 'GET' && p === '/api/build') {
     return json(res, 200, { ok: true, build: await buildstate.buildState() }, req, started);
@@ -676,7 +685,11 @@ const server = http.createServer((req, res) => {
 server.listen(CFG.port, CFG.host || '127.0.0.1', () => {
   console.log('agent-hub collector listening on http://' + (CFG.host || '127.0.0.1') + ':' + CFG.port);
   console.log('site (boris): http://127.0.0.1:8090/  ·  token: .runtime/upload-token');
-  store.addEvent({ agent: 'hub', type: 'hub', message: 'collector online on port ' + CFG.port });
+  // one "online" event per quiet period, not per restart (restart storms
+  // would otherwise spam the feed)
+  if (!store.recentHubEvent(10 * 60 * 1000)) {
+    store.addEvent({ agent: 'hub', type: 'hub', message: 'collector online on port ' + CFG.port });
+  }
 });
 
 process.on('SIGINT', () => process.exit(0));

@@ -620,6 +620,21 @@ function addEvent({ agent, type, message, meta }) {
   return entry;
 }
 
+// True if a hub-lifecycle event exists within the window — used to keep
+// collector restarts from spamming "online" events into the feed.
+function recentHubEvent(withinMs) {
+  try {
+    const lines = fs.readFileSync(EVENTS_FILE, 'utf8').trimEnd().split('\n');
+    for (let i = lines.length - 1; i >= Math.max(0, lines.length - 50); i--) {
+      try {
+        const e = JSON.parse(lines[i]);
+        if (e.agent === 'hub' && e.type === 'hub') return Date.now() - Date.parse(e.ts) < withinMs;
+      } catch { /* skip malformed */ }
+    }
+  } catch { /* no log yet */ }
+  return false;
+}
+
 // The event log is append-only and would otherwise grow forever; when it
 // passes 2 MiB, keep only the most recent 1000 entries.
 function trimEvents() {
@@ -674,5 +689,5 @@ module.exports = {
   slugify, sanitizeName,
   savePost, listPosts, getPostRaw, postExists, deletePost,
   saveImage, listImages, deleteImage,
-  addEvent, listEvents, eventsForFeed, counts, syncGeneratedDocs,
+  addEvent, listEvents, eventsForFeed, counts, syncGeneratedDocs, recentHubEvent,
 };

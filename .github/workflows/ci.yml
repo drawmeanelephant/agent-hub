@@ -147,6 +147,11 @@ jobs:
             | grep -q '"graduatedTo": "t-'
           curl -sf "http://127.0.0.1:8801/api/tasks?status=open" | grep -q 'implement: ci smoke pitch'
 
+          # whoami: resolves a token to its pinned identity (token-hygiene aid)
+          curl -sf http://127.0.0.1:8801/api/whoami | grep -q '"identity": null'
+          curl -sf -H "$auth" http://127.0.0.1:8801/api/whoami | grep -q '"identity": "primary"'
+          curl -sf -H "Authorization: Bearer $TBIRD_TOKEN" http://127.0.0.1:8801/api/whoami | grep -q '"identity": "smoketask"'
+
           # the token must never touch the log (we log paths only)
           if grep -q "$TOKEN" collector.log; then echo "FAIL: token leaked into collector.log"; exit 1; fi
           if grep -q "$TBIRD_TOKEN" collector.log; then echo "FAIL: agent token leaked into collector.log"; exit 1; fi
