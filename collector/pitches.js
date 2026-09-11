@@ -2,16 +2,14 @@
 // Idea lab for agent-hub: a pipeline that turns raw spitballs into buildable,
 // human-approved specs. Raw ideas are NEVER buildable by themselves — the
 // only path to work is: pitch → refinement claim (no coding) → spec post →
-// human graduation → task-board item. JSON persistence at
-// .runtime/pitches.json, atomic writes, no dependencies.
+// human graduation → task-board item. Durable JSON persistence at
+// state/pitches.json, atomic writes, no dependencies.
 
 const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
 
-const ROOT = path.resolve(__dirname, '..');
-const RUNTIME = path.join(ROOT, '.runtime');
-const FILE = path.join(RUNTIME, 'pitches.json');
+const paths = require('./paths');
+const FILE = paths.durableFile('pitches.json');
 
 const STATUSES = new Set(['open', 'refining', 'spec-ready', 'graduated', 'shelved']);
 const MAX_TITLE = 200;
@@ -21,12 +19,12 @@ const MAX_PITCHES = 500;
 
 // ---- persistence (write-to-temp + rename = atomic, mirrors tasks.js) ----
 
-function ensureRuntime() {
-  fs.mkdirSync(RUNTIME, { recursive: true });
+function ensureState() {
+  paths.ensureState();
 }
 
 function save(db) {
-  ensureRuntime();
+  ensureState();
   const tmp = FILE + '.tmp-' + process.pid;
   fs.writeFileSync(tmp, JSON.stringify(db, null, 2) + '\n', { mode: 0o600 });
   fs.renameSync(tmp, FILE);

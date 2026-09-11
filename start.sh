@@ -4,7 +4,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 RUN=.runtime
-mkdir -p "$RUN"
+STATE=state
+mkdir -p "$RUN" "$STATE"
 
 # Pick the Node binary: BORIS_NODE env wins, then the newest nvm Node 26+,
 # then plain `node`. The collector is stdlib-only so any modern Node works.
@@ -61,6 +62,6 @@ fi
 echo
 echo "  site:      http://127.0.0.1:8090/   (dashboard + blog, served by boris)"
 echo "  collector: http://127.0.0.1:8801/   (upload API for agents)"
-echo "  token:     $(cat "$RUN/upload-token" 2>/dev/null || echo '(not created yet — check collector.log)')   (human/admin)"
+echo "  token:     $(cat "$STATE/upload-token" 2>/dev/null || echo '(not created yet — check collector.log)')   (human/admin)"
 echo "  agents:    node collector/tokens.js add <name>   (mint one per agent)"
 echo "  logs:      boris.log · collector.log   stop: ./stop.sh"

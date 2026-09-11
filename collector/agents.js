@@ -1,15 +1,13 @@
 'use strict';
 // Agent status registry for agent-hub: each agent posts its current state
 // (working / blocked / idle / done) through the collector API so the fleet
-// can see who is doing what without interrupting anyone. JSON persistence at
-// .runtime/agents.json, atomic writes, no dependencies.
+// can see who is doing what without interrupting anyone. Durable JSON
+// persistence at state/agents.json, atomic writes, no dependencies.
 
 const fs = require('fs');
-const path = require('path');
 
-const ROOT = path.resolve(__dirname, '..');
-const RUNTIME = path.join(ROOT, '.runtime');
-const FILE = path.join(RUNTIME, 'agents.json');
+const paths = require('./paths');
+const FILE = paths.durableFile('agents.json');
 
 const STATUSES = new Set(['working', 'blocked', 'idle', 'done']);
 const MAX_ROLE = 120;
@@ -17,12 +15,12 @@ const MAX_NOTE = 500;
 
 // ---- persistence (write-to-temp + rename = atomic, mirrors store.js style) ----
 
-function ensureRuntime() {
-  fs.mkdirSync(RUNTIME, { recursive: true });
+function ensureState() {
+  paths.ensureState();
 }
 
 function save(db) {
-  ensureRuntime();
+  ensureState();
   const tmp = FILE + '.tmp-' + process.pid;
   fs.writeFileSync(tmp, JSON.stringify(db, null, 2) + '\n', { mode: 0o600 });
   fs.renameSync(tmp, FILE);

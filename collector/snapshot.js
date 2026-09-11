@@ -243,7 +243,7 @@ let cache = { at: 0, data: null };
 let pending = null;
 let warm = false;
 
-function snapPath(cfg) { return path.join(cfg.ROOT, '.runtime', 'snapshot.json'); }
+function snapPath(cfg) { return path.join(cfg.ROOT, cfg.runtimeDir || '.runtime', 'snapshot.json'); }
 
 function loadDisk(cfg) {
   try {
@@ -255,7 +255,7 @@ function loadDisk(cfg) {
 
 function saveDisk(cfg) {
   try {
-    fs.mkdirSync(path.join(cfg.ROOT, '.runtime'), { recursive: true });
+    fs.mkdirSync(path.join(cfg.ROOT, cfg.runtimeDir || '.runtime'), { recursive: true });
     fs.writeFileSync(snapPath(cfg), JSON.stringify(cache));
   } catch { /* best-effort cache persistence */ }
 }
