@@ -22,7 +22,7 @@ jobs:
           done
           exit $fail
       - name: bash -n shell scripts
-        run: bash -n start.sh stop.sh
+        run: bash -n start.sh stop.sh collector/ci-work-protocol.sh
       - name: config JSON parses
         run: node -e 'JSON.parse(require("fs").readFileSync("collector/config.json", "utf8"))'
 
@@ -164,6 +164,20 @@ jobs:
           curl -sf -X DELETE -H "$auth" "http://127.0.0.1:8801/api/images?post=ci-media&name=evil.svg" >/dev/null
           kill $PID
           echo "collector smoke: all assertions passed"
+
+  work-protocol:
+    name: work-protocol
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: lease lifecycle acceptance (AC1-AC7)
+        env:
+          HUB_PORT: 8801
+          HUB_GRACE_SEC: 1
+        run: bash collector/ci-work-protocol.sh
 
   state-split:
     name: state-split

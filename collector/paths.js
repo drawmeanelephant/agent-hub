@@ -24,7 +24,7 @@ const RUN_DIR = path.join(ROOT, CFG.runtimeDir || '.runtime');
 const STATE_DIR = path.join(ROOT, CFG.stateDir || 'state');
 
 // Files that hold fleet memory. Everything else under RUN_DIR is disposable.
-const DURABLE = ['tasks.json', 'pitches.json', 'questions.json', 'agents.json', 'tokens.json', 'upload-token'];
+const DURABLE = ['tasks.json', 'pitches.json', 'questions.json', 'agents.json', 'tokens.json', 'upload-token', 'leases.json', 'directives.json'];
 
 let lastMigration = [];
 
