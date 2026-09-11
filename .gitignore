@@ -4,6 +4,11 @@ dist/
 *.log
 .DS_Store
 
+# Isolated agent worktrees (`git worktree add .worktrees/<name>`) and the
+# work-protocol acceptance run's scratch dir (logs, config backup)
+.worktrees/
+.ci-work/
+
 # Durable fleet memory (tasks, pitches, questions, roster, identity/tokens).
 # Survives `rm -rf .runtime`; contains secrets, so never commit it.
 state/

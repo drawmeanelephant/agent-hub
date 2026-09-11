@@ -10,5 +10,23 @@
   "localScanDepth": 2,
   "maxPostBytes": 524288,
   "maxImageBytes": 26214400,
-  "hardAttribution": true
+  "hardAttribution": true,
+  "work": {
+    "ttlSec": 300,
+    "ttlFloorSec": 120,
+    "ttlCeilSec": 3600,
+    "graceSec": 120,
+    "persistSeconds": 15,
+    "maxLeases": 500,
+    "sharedArtifacts": [
+      "package-lock.json",
+      "yarn.lock",
+      "pnpm-lock.yaml",
+      "Cargo.lock",
+      "poetry.lock",
+      "go.sum",
+      "dist/**",
+      "content/posts/*.assets/**"
+    ]
+  }
 }

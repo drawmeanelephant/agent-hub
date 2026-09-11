@@ -13,6 +13,8 @@ const questions = require('./questions');
 const agents = require('./agents');
 const tasks = require('./tasks');
 const pitches = require('./pitches');
+const leases = require('./leases');
+const directives = require('./directives');
 
 const CFG = { ...JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8')), ROOT: store.ROOT };
 const STARTED = Date.now();
@@ -55,6 +57,16 @@ function json(res, code, obj, req, started) {
 
 function err(res, code, msg, req, started) {
   json(res, code, { ok: false, error: msg }, req, started);
+}
+
+// Lease/directive errors may carry a status and a conflict holder (409s) so the
+// loser of a race learns who to talk to, not just "blocked".
+function richErr(res, e, req, started) {
+  const code = e && e.status ? e.status : 409;
+  if (e && e.holder) {
+    return json(res, code, { ok: false, error: String(e.message || e), holder: e.holder, leaseId: e.leaseId, reason: e.reason }, req, started);
+  }
+  return err(res, code, String(e.message || e), req, started);
 }
 
 // Returns the authenticated token identity { name } or null.
@@ -405,6 +417,176 @@ async function handle(req, res) {
     }
   }
 
+  // ---- work protocol: path-scoped leases + pre-git guard ----
+  if (method === 'GET' && p === '/api/leases') {
+    const status = url.searchParams.get('status') || 'all';
+    const allowed = ['active', 'stale', 'reclaim-pending', 'released', 'reclaimed', 'cancelled', 'mine', 'all'];
+    if (!allowed.includes(status)) {
+      return err(res, 400, '?status= must be ' + allowed.join(', '), req, started);
+    }
+    let agent = url.searchParams.get('agent');
+    if (status === 'mine') {
+      const tok = authorized(req, url);
+      if (!tok) return err(res, 401, 'unauthorized — ?status=mine needs a token', req, started);
+      agent = tok.name;
+    }
+    const rows = leases.listLeases({
+      status: status === 'mine' ? 'all' : status,
+      task: url.searchParams.get('task'),
+      agent,
+      paths: url.searchParams.get('paths'),
+      since: url.searchParams.get('since'),
+    });
+    return json(res, 200, {
+      ok: true,
+      now: new Date().toISOString(),
+      counts: leases.countsByState(),
+      count: rows.length,
+      leases: rows,
+    }, req, started);
+  }
+
+  if (method === 'POST' && p === '/api/leases') {
+    const tok = authorized(req, url);
+    if (!tok) return err(res, 401, 'unauthorized — pass an upload token', req, started);
+    let obj;
+    try { obj = JSON.parse((await readBody(req, 65536)).toString('utf8') || '{}'); } catch { return err(res, 400, 'invalid JSON body', req, started); }
+    if (!obj.taskId) return err(res, 400, 'taskId is required', req, started);
+    const task = tasks.getTask(String(obj.taskId));
+    if (!task) return err(res, 404, 'no such task', req, started);
+    try {
+      const r = leases.claimLease({
+        taskId: task.id,
+        holder: tok.name, // hard attribution — you cannot hold as another agent
+        paths: obj.paths,
+        area: obj.area,
+        scope: obj.scope,
+        intent: obj.intent,
+        ttlSec: obj.ttlSec,
+        sharedArtifacts: obj.sharedArtifacts,
+      });
+      return json(res, 201, { ok: true, lease: r.lease, advice: r.advise.length ? r.advise : undefined }, req, started);
+    } catch (e) {
+      return richErr(res, e, req, started);
+    }
+  }
+
+  const leaseAction = /^\/api\/leases\/([a-z0-9][a-z0-9-]*)\/(heartbeat|release|reclaim)$/.exec(p);
+  if (method === 'POST' && leaseAction) {
+    const tok = authorized(req, url);
+    if (!tok) return err(res, 401, 'unauthorized — pass an upload token', req, started);
+    let obj = {};
+    try { obj = JSON.parse((await readBody(req, 65536)).toString('utf8') || '{}'); } catch { /* body optional */ }
+    try {
+      let out;
+      if (leaseAction[2] === 'heartbeat') {
+        out = { lease: leases.heartbeatLease(leaseAction[1], { by: tok.name, note: obj.note, ttlSec: obj.ttlSec }) };
+      } else if (leaseAction[2] === 'release') {
+        out = { lease: leases.releaseLease(leaseAction[1], { by: tok.name, note: obj.note, prRef: obj.prRef }) };
+      } else {
+        out = leases.reclaimLease(leaseAction[1], { by: tok.name, reason: obj.reason });
+      }
+      if (!out || !out.lease) return err(res, 404, 'no such lease', req, started);
+      return json(res, leaseAction[2] === 'reclaim' ? 202 : 200, { ok: true, ...out }, req, started);
+    } catch (e) {
+      return richErr(res, e, req, started);
+    }
+  }
+
+  if (method === 'GET' && p === '/api/claims') {
+    const paths = url.searchParams.get('paths') || '';
+    const task = url.searchParams.get('task') || null;
+    if (!paths && !task) {
+      return err(res, 400, 'pass ?paths=<globs> (and optionally ?task=) — the guard needs something to check', req, started);
+    }
+    const out = leases.assess({ taskId: task, paths, intent: url.searchParams.get('intent'), scope: 'paths', sharedArtifacts: true });
+    return json(res, 200, {
+      ok: true,
+      check: { taskId: task, paths: leases.cleanPaths(paths), intent: url.searchParams.get('intent') || null },
+      block: out.block,
+      advise: out.advise,
+      counts: leases.countsByState(),
+    }, req, started);
+  }
+
+  if (method === 'GET' && p === '/api/work') {
+    const tok = authorized(req, url);
+    const agent = (tok && tok.name) || url.searchParams.get('agent');
+    if (!agent) return err(res, 400, 'pass ?agent=<name> (or your token) — /api/work is per-agent', req, started);
+    const since = url.searchParams.get('since');
+    const sinceTs = since && Number.isFinite(Date.parse(since)) ? Date.parse(since) : null;
+    const mine = leases.listLeases({ agent, status: 'all' })
+      .filter((l) => !['released', 'reclaimed', 'cancelled'].includes(l.state));
+    const now = Date.now();
+    const taskIds = [...new Set(mine.map((l) => l.taskId))];
+    return json(res, 200, {
+      ok: true,
+      now: new Date(now).toISOString(),
+      agent,
+      leases: mine.map((l) => ({
+        ...l,
+        heartbeatDue: Date.parse(l.expiresAt) - now <= (l.ttlSec * 1000) / 2,
+      })),
+      advice: leases.adviceFor(agent),
+      directives: directives.forAgent(agent, taskIds, sinceTs),
+      answers: questions.listQuestions('answered')
+        .filter((q) => q.agent === agent && (sinceTs == null || Date.parse(q.answeredAt) > sinceTs)),
+      poll: 'pass ?since=<now> for only newer answers/directives; leases and advice are always current',
+    }, req, started);
+  }
+
+  if (method === 'GET' && p === '/api/directives') {
+    const status = url.searchParams.get('status') || 'open';
+    if (!['open', 'acked', 'done', 'dismissed', 'all'].includes(status)) {
+      return err(res, 400, '?status= must be open, acked, done, dismissed, or all', req, started);
+    }
+    const rows = directives.listDirectives({
+      status,
+      target: url.searchParams.get('target'),
+      task: url.searchParams.get('task'),
+      agent: url.searchParams.get('agent'),
+      since: url.searchParams.get('since'),
+    });
+    return json(res, 200, { ok: true, counts: directives.counts(), count: rows.length, directives: rows }, req, started);
+  }
+
+  if (method === 'POST' && p === '/api/directives') {
+    const tok = authorized(req, url);
+    if (!tok) return err(res, 401, 'unauthorized — pass an upload token', req, started);
+    if (tok.name !== 'primary') {
+      return err(res, 403, 'directives are humans-only: use the primary/admin token (state/upload-token)', req, started);
+    }
+    let obj;
+    try { obj = JSON.parse((await readBody(req, 65536)).toString('utf8') || '{}'); } catch { return err(res, 400, 'invalid JSON body', req, started); }
+    try {
+      const d = directives.addDirective({ text: obj.text, target: obj.target, taskId: obj.taskId, agent: obj.agent, createdBy: 'human' });
+      const scope = d.target === 'task' ? 'task ' + d.taskId : d.target === 'agent' ? 'agent ' + d.agent : 'global';
+      store.addEvent({ agent: 'human', type: 'directive', message: 'directive ' + d.id + ' (' + scope + '): ' + d.text.slice(0, 160) });
+      return json(res, 201, { ok: true, directive: d }, req, started);
+    } catch (e) {
+      return err(res, 400, String(e.message || e), req, started);
+    }
+  }
+
+  const directiveAction = /^\/api\/directives\/([a-z0-9][a-z0-9-]*)\/(ack|done|dismiss)$/.exec(p);
+  if (method === 'POST' && directiveAction) {
+    const tok = authorized(req, url);
+    if (!tok) return err(res, 401, 'unauthorized — pass an upload token', req, started);
+    if (directiveAction[2] === 'dismiss' && tok.name !== 'primary') {
+      return err(res, 403, 'dismissing a directive is humans-only: use the primary/admin token', req, started);
+    }
+    let obj = {};
+    try { obj = JSON.parse((await readBody(req, 65536)).toString('utf8') || '{}'); } catch { /* body optional */ }
+    try {
+      const d = directives.lifecycle(directiveAction[1], { action: directiveAction[2], by: tok.name, note: obj.note });
+      if (!d) return err(res, 404, 'no such directive', req, started);
+      store.addEvent({ agent: tok.name, type: 'directive', message: directiveAction[2] + ' directive ' + d.id + ' (' + d.target + ')' });
+      return json(res, 200, { ok: true, directive: d }, req, started);
+    } catch (e) {
+      return richErr(res, e, req, started);
+    }
+  }
+
   // ---- status (dashboard + agents) ----
   if (method === 'GET' && p === '/api/status') {
     store.syncGeneratedDocs(); // keep on-site docs pages in sync with the sources
@@ -417,6 +599,8 @@ async function handle(req, res) {
       openQuestions: questions.openCount(),
       tasks: tasks.countsByStatus(),
       pitches: pitches.countsByStatus(),
+      leases: leases.countsByState(),
+      directives: directives.counts(),
       build: await buildstate.buildState(),
       tokens: store.listTokens().map((t) => ({ name: t.name, created: t.created, lastUsed: t.lastUsed })),
       github: { ...snap.github, fetchedAt: snapshot.snapshotAge() === null ? null : new Date(Date.now() - (snapshot.snapshotAge() || 0)).toISOString() },
