@@ -1,19 +1,17 @@
 'use strict';
 // Questions-for-humans board for agent-hub: agents POST questions through the
-// collector API, the human answers them (dashboard or this CLI). JSON
-// persistence at .runtime/questions.json, atomic writes, no dependencies.
+// collector API, the human answers them (dashboard or this CLI). Durable JSON
+// persistence at state/questions.json, atomic writes, no dependencies.
 //
 // CLI (for the human, from the agent-hub folder):
 //   node collector/questions.js list [--all]
 //   node collector/questions.js answer <id> "the answer text"
 
 const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
 
-const ROOT = path.resolve(__dirname, '..');
-const RUNTIME = path.join(ROOT, '.runtime');
-const FILE = path.join(RUNTIME, 'questions.json');
+const paths = require('./paths');
+const FILE = paths.durableFile('questions.json');
 
 const MAX_QUESTION = 2000;
 const MAX_CONTEXT = 4000;
@@ -21,12 +19,12 @@ const MAX_ANSWER = 4000;
 
 // ---- persistence (write-to-temp + rename = atomic, mirrors store.js style) ----
 
-function ensureRuntime() {
-  fs.mkdirSync(RUNTIME, { recursive: true });
+function ensureState() {
+  paths.ensureState();
 }
 
 function save(db) {
-  ensureRuntime();
+  ensureState();
   const tmp = FILE + '.tmp-' + process.pid;
   fs.writeFileSync(tmp, JSON.stringify(db, null, 2) + '\n', { mode: 0o600 });
   fs.renameSync(tmp, FILE);

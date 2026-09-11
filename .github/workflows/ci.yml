@@ -47,7 +47,7 @@ jobs:
           done
           curl -sf http://127.0.0.1:8801/api/health >/dev/null
 
-          TOKEN=$(cat .runtime/upload-token)
+          TOKEN=$(cat state/upload-token)
           auth="Authorization: Bearer $TOKEN"
 
           # post lands, feed advertises it
@@ -164,6 +164,62 @@ jobs:
           curl -sf -X DELETE -H "$auth" "http://127.0.0.1:8801/api/images?post=ci-media&name=evil.svg" >/dev/null
           kill $PID
           echo "collector smoke: all assertions passed"
+
+  state-split:
+    name: state-split
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: migrates a pre-split install, then survives a .runtime wipe
+        run: |
+          set -e
+          sleep 1
+          rm -rf state .runtime
+          mkdir -p .runtime
+
+          # seed a pre-split (old layout) durable fixture
+          printf '%s\n' '{"tasks":{"t-legacy":{"id":"t-legacy","title":"legacy task","detail":null,"status":"open","createdBy":"ci","claimedBy":null,"claimedAt":null,"doneAt":null,"result":null,"createdAt":"2020-01-01T00:00:00.000Z","updatedAt":"2020-01-01T00:00:00.000Z"}}}' > .runtime/tasks.json
+          printf 'legacytoken\n' > .runtime/upload-token
+          printf '%s\n' '{"tokens":{"legacytoken":{"name":"primary","created":"2020-01-01T00:00:00.000Z","lastUsed":null}}}' > .runtime/tokens.json
+
+          # requiring any store triggers the one-time, locked migration
+          node -e 'require("./collector/tasks")'
+          test -f state/tasks.json
+          test -f state/tokens.json
+          test -f state/upload-token
+          test -f state/.layout
+          test ! -f .runtime/tasks.json
+          test ! -f .runtime/upload-token
+
+          boot() {
+            node collector/server.js > "$1" 2>&1 &
+            echo $! > .ci-pid
+            for i in $(seq 1 40); do
+              curl -sf http://127.0.0.1:8801/api/health >/dev/null && return 0
+              sleep 0.5
+            done
+            cat "$1"; return 1
+          }
+          stop() { kill "$(cat .ci-pid)" 2>/dev/null || true; sleep 1; rm -f .ci-pid; }
+
+          # boot on migrated state: board + identity intact
+          boot collector-split1.log
+          curl -sf http://127.0.0.1:8801/api/tasks | grep -q legacy
+          LTOKEN=$(cat state/upload-token)
+          curl -sf -H "Authorization: Bearer $LTOKEN" http://127.0.0.1:8801/api/whoami | grep -q '"identity": "primary"'
+          stop
+
+          # wipe ALL disposable runtime, reboot: memory must survive
+          rm -rf .runtime
+          boot collector-split2.log
+          curl -sf http://127.0.0.1:8801/api/tasks | grep -q legacy
+          LTOKEN=$(cat state/upload-token)
+          curl -sf -H "Authorization: Bearer $LTOKEN" http://127.0.0.1:8801/api/whoami | grep -q '"identity": "primary"'
+          stop
+          echo "state-split: migration + wipe survival passed"
 
   boris-build:
     name: boris-build

@@ -7,19 +7,22 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const ROOT = path.resolve(__dirname, '..');
+const paths = require('./paths');
+const ROOT = paths.ROOT;
 const CONTENT = path.join(ROOT, 'content');
 const POSTS = path.join(CONTENT, 'posts');
-const RUNTIME = path.join(ROOT, '.runtime');
+// Durable fleet memory lives in state/; disposable caches/logs/pids in .runtime/.
+const RUNTIME = paths.RUN_DIR;
+const STATE = paths.STATE_DIR;
 const EVENTS_FILE = path.join(RUNTIME, 'events.jsonl');
-const TOKEN_FILE = path.join(RUNTIME, 'upload-token');
-const TOKENS_FILE = path.join(RUNTIME, 'tokens.json');
+const TOKEN_FILE = path.join(STATE, 'upload-token');
+const TOKENS_FILE = path.join(STATE, 'tokens.json');
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.avif']);
 const BORIS_FM_KEYS = new Set(['title', 'parent', 'tags', 'status', 'relations', 'id']);
 
 function ensureDirs() {
-  for (const dir of [CONTENT, POSTS, RUNTIME]) fs.mkdirSync(dir, { recursive: true });
+  for (const dir of [CONTENT, POSTS, RUNTIME, STATE]) fs.mkdirSync(dir, { recursive: true });
 }
 
 function token() {
@@ -39,7 +42,10 @@ let tokenCache = null;
 let tokenCacheMtime = 0;
 
 function readPrimaryToken() {
-  try { const t = fs.readFileSync(TOKEN_FILE, 'utf8').trim(); return t || null; } catch { return null; }
+  try { const t = fs.readFileSync(TOKEN_FILE, 'utf8').trim(); if (t) return t; } catch { /* not in state yet */ }
+  // One-release fallback: the pre-split location. Migration normally moves it
+  // before we get here, so this is only a safety net for old tooling.
+  try { const t = fs.readFileSync(path.join(RUNTIME, 'upload-token'), 'utf8').trim(); return t || null; } catch { return null; }
 }
 
 // Reloads whenever tokens.json changes on disk (e.g. tokens.js CLI ran while

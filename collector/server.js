@@ -223,7 +223,7 @@ async function handle(req, res) {
     const tok = authorized(req, url);
     if (!tok) return err(res, 401, 'unauthorized — pass an upload token', req, started);
     if (tok.name !== 'primary') {
-      return err(res, 403, 'answering questions is humans-only: use the primary/admin token (.runtime/upload-token)', req, started);
+      return err(res, 403, 'answering questions is humans-only: use the primary/admin token (state/upload-token)', req, started);
     }
     let obj;
     try { obj = JSON.parse((await readBody(req, CFG.maxPostBytes)).toString('utf8') || '{}'); } catch { return err(res, 400, 'invalid JSON body', req, started); }
@@ -684,7 +684,7 @@ const server = http.createServer((req, res) => {
 
 server.listen(CFG.port, CFG.host || '127.0.0.1', () => {
   console.log('agent-hub collector listening on http://' + (CFG.host || '127.0.0.1') + ':' + CFG.port);
-  console.log('site (boris): http://127.0.0.1:8090/  ·  token: .runtime/upload-token');
+  console.log('site (boris): http://127.0.0.1:8090/  ·  token: state/upload-token');
   // one "online" event per quiet period, not per restart (restart storms
   // would otherwise spam the feed)
   if (!store.recentHubEvent(10 * 60 * 1000)) {

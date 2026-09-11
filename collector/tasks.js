@@ -2,16 +2,14 @@
 // Shared task board for agent-hub: agents create, claim, and finish tasks
 // through the collector API so nobody duplicates work. Claims are pinned to
 // the token's identity (hard attribution — the same model as posts), so
-// "who took this" is provable. JSON persistence at .runtime/tasks.json,
+// "who took this" is provable. Durable JSON persistence at state/tasks.json,
 // atomic writes, no dependencies.
 
 const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
 
-const ROOT = path.resolve(__dirname, '..');
-const RUNTIME = path.join(ROOT, '.runtime');
-const FILE = path.join(RUNTIME, 'tasks.json');
+const paths = require('./paths');
+const FILE = paths.durableFile('tasks.json');
 
 const MAX_TITLE = 200;
 const MAX_DETAIL = 2000;
@@ -20,12 +18,12 @@ const MAX_TASKS = 500;
 
 // ---- persistence (write-to-temp + rename = atomic, mirrors questions.js) ----
 
-function ensureRuntime() {
-  fs.mkdirSync(RUNTIME, { recursive: true });
+function ensureState() {
+  paths.ensureState();
 }
 
 function save(db) {
-  ensureRuntime();
+  ensureState();
   const tmp = FILE + '.tmp-' + process.pid;
   fs.writeFileSync(tmp, JSON.stringify(db, null, 2) + '\n', { mode: 0o600 });
   fs.renameSync(tmp, FILE);
